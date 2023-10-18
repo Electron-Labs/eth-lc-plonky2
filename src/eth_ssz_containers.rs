@@ -1,5 +1,9 @@
+use crate::merkle_tree_gadget::{
+    add_verify_merkle_proof_target, add_virtual_merkle_tree_sha256_target,
+    set_verify_merkle_proof_target, VerifyMerkleProofTarget,
+};
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField,
+    field::extension::Extendable, hash::hash_types::RichField, iop::target::Target,
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::{
@@ -7,10 +11,14 @@ use plonky2_crypto::{
     u32::arithmetic_u32::CircuitBuilderU32,
 };
 
-use crate::merkle_tree_gadget::{
-    add_virtual_merkle_tree_sha256_target, set_verify_merkle_proof_target, VerifyMerkleProofTarget,
-};
+const FINALIZED_HEADER_INDEX: usize = 105;
+const FINALIZED_HEADER_HEIGHT: usize = 6;
 
+pub struct SigningRootTarget {
+    pub signing_root: Hash256Target,
+    pub header_root: Hash256Target,
+    pub domain: Hash256Target,
+}
 pub struct BeaconBlockHeaderTarget {
     pub header_root: Hash256Target,
     pub slot: Hash256Target,
@@ -20,10 +28,63 @@ pub struct BeaconBlockHeaderTarget {
     pub body_root: Hash256Target,
 }
 
-pub struct SigningRootTarget {
+pub struct ProofTarget {
     pub signing_root: Hash256Target,
-    pub header_root: Hash256Target,
+    pub attested_header_root: Hash256Target,
     pub domain: Hash256Target,
+    pub attested_slot: Hash256Target,
+    pub attested_proposer_index: Hash256Target,
+    pub attested_parent_root: Hash256Target,
+    pub attested_state_root: Hash256Target,
+    pub attested_body_root: Hash256Target,
+    pub finalized_header_root: Hash256Target,
+    pub finality_branch: Vec<Hash256Target>,
+    pub finalized_slot: Hash256Target,
+    pub finalized_proposer_index: Hash256Target,
+    pub finalized_parent_root: Hash256Target,
+    pub finalized_state_root: Hash256Target,
+    pub finalized_body_root: Hash256Target,
+    pub signing_root_target: SigningRootTarget,
+    pub attested_beacon_block_header_target: BeaconBlockHeaderTarget,
+    pub finalized_beacon_block_header_target: BeaconBlockHeaderTarget,
+    pub finality_branch_target: VerifyMerkleProofTarget,
+}
+
+pub fn register_hash256_public_inputs<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    targets: &Vec<Hash256Target>,
+) {
+    targets.iter().for_each(|target| {
+        target
+            .iter()
+            .for_each(|elm| builder.register_public_input(elm.0))
+    });
+}
+
+pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> SigningRootTarget {
+    let header_root = builder.add_virtual_hash256_target();
+    let domain = builder.add_virtual_hash256_target();
+    let signing_root = builder.add_virtual_hash256_target();
+
+    let merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 1);
+    builder.connect_hash256(header_root, merkle_tree_target.leaves[0]);
+    builder.connect_hash256(domain, merkle_tree_target.leaves[1]);
+
+    let zero_u32 = builder.zero_u32();
+    for &target in merkle_tree_target.leaves[2..].iter() {
+        for &limb in target.iter() {
+            builder.connect_u32(limb, zero_u32);
+        }
+    }
+
+    builder.connect_hash256(signing_root, merkle_tree_target.root);
+    SigningRootTarget {
+        signing_root,
+        header_root,
+        domain,
+    }
 }
 
 pub fn add_virtual_beacon_block_header_target<F: RichField + Extendable<D>, const D: usize>(
@@ -51,6 +112,7 @@ pub fn add_virtual_beacon_block_header_target<F: RichField + Extendable<D>, cons
     }
 
     builder.connect_hash256(header_root, merkle_tree_target.root);
+
     BeaconBlockHeaderTarget {
         header_root,
         slot,
@@ -61,31 +123,125 @@ pub fn add_virtual_beacon_block_header_target<F: RichField + Extendable<D>, cons
     }
 }
 
-pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: usize>(
+pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-) -> SigningRootTarget {
-    let header_root = builder.add_virtual_hash256_target();
-    let domain = builder.add_virtual_hash256_target();
+) -> ProofTarget {
+    let signing_root_target = add_virtual_signing_root_target(builder);
+    let attested_beacon_block_header_target = add_virtual_beacon_block_header_target(builder);
+    let finalized_beacon_block_header_target = add_virtual_beacon_block_header_target(builder);
+    let finality_branch_target =
+        add_verify_merkle_proof_target(builder, FINALIZED_HEADER_INDEX, FINALIZED_HEADER_HEIGHT);
+
     let signing_root = builder.add_virtual_hash256_target();
+    let attested_header_root = builder.add_virtual_hash256_target();
+    let domain = builder.add_virtual_hash256_target();
+    let attested_slot = builder.add_virtual_hash256_target();
+    let attested_proposer_index = builder.add_virtual_hash256_target();
+    let attested_parent_root = builder.add_virtual_hash256_target();
+    let attested_state_root = builder.add_virtual_hash256_target();
+    let attested_body_root = builder.add_virtual_hash256_target();
+    let finalized_header_root = builder.add_virtual_hash256_target();
+    let finalized_slot = builder.add_virtual_hash256_target();
+    let finalized_proposer_index = builder.add_virtual_hash256_target();
+    let finalized_parent_root = builder.add_virtual_hash256_target();
+    let finalized_state_root = builder.add_virtual_hash256_target();
+    let finalized_body_root = builder.add_virtual_hash256_target();
+    let finality_branch = (0..FINALIZED_HEADER_HEIGHT)
+        .map(|_| builder.add_virtual_hash256_target())
+        .collect::<Vec<Hash256Target>>();
 
-    let merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 1);
-    builder.connect_hash256(header_root, merkle_tree_target.leaves[0]);
-    builder.connect_hash256(domain, merkle_tree_target.leaves[1]);
+    // signing root
+    builder.connect_hash256(signing_root, signing_root_target.signing_root);
+    builder.connect_hash256(attested_header_root, signing_root_target.header_root);
+    builder.connect_hash256(domain, signing_root_target.domain);
 
-    let zero_u32 = builder.zero_u32();
-    for &target in merkle_tree_target.leaves[2..].iter() {
-        for &limb in target.iter() {
-            builder.connect_u32(limb, zero_u32);
-        }
-    }
+    // attested block header
+    builder.connect_hash256(
+        attested_body_root,
+        attested_beacon_block_header_target.body_root,
+    );
+    builder.connect_hash256(
+        attested_header_root,
+        attested_beacon_block_header_target.header_root,
+    );
+    builder.connect_hash256(
+        attested_parent_root,
+        attested_beacon_block_header_target.parent_root,
+    );
+    builder.connect_hash256(
+        attested_proposer_index,
+        attested_beacon_block_header_target.proposer_index,
+    );
+    builder.connect_hash256(attested_slot, attested_beacon_block_header_target.slot);
 
-    builder.connect_hash256(signing_root, merkle_tree_target.root);
+    builder.connect_hash256(
+        attested_state_root,
+        attested_beacon_block_header_target.state_root,
+    );
 
-    SigningRootTarget {
+    // finalized block header
+    builder.connect_hash256(
+        finalized_body_root,
+        finalized_beacon_block_header_target.body_root,
+    );
+    builder.connect_hash256(
+        finalized_header_root,
+        finalized_beacon_block_header_target.header_root,
+    );
+    builder.connect_hash256(
+        finalized_parent_root,
+        finalized_beacon_block_header_target.parent_root,
+    );
+    builder.connect_hash256(
+        finalized_proposer_index,
+        finalized_beacon_block_header_target.proposer_index,
+    );
+    builder.connect_hash256(finalized_slot, finalized_beacon_block_header_target.slot);
+    builder.connect_hash256(
+        finalized_state_root,
+        finalized_beacon_block_header_target.state_root,
+    );
+
+    // finality branch
+    builder.connect_hash256(finalized_header_root, finality_branch_target.leaf);
+    builder.connect_hash256(attested_state_root, finality_branch_target.root);
+    (0..FINALIZED_HEADER_HEIGHT)
+        .into_iter()
+        .for_each(|i| builder.connect_hash256(finality_branch[i], finality_branch_target.proof[i]));
+
+    ProofTarget {
         signing_root,
-        header_root,
+        attested_header_root,
         domain,
+        attested_slot,
+        attested_proposer_index,
+        attested_parent_root,
+        attested_state_root,
+        attested_body_root,
+        finalized_header_root,
+        finality_branch,
+        finalized_slot,
+        finalized_proposer_index,
+        finalized_parent_root,
+        finalized_state_root,
+        finalized_body_root,
+        signing_root_target,
+        attested_beacon_block_header_target,
+        finalized_beacon_block_header_target,
+        finality_branch_target,
     }
+}
+
+pub fn set_signing_root_target<F: RichField, W: WitnessHashSha2<F>>(
+    witness: &mut W,
+    header_root: &[u8; 32],
+    domain: &[u8; 32],
+    signing_root: &[u8; 32],
+    target: &SigningRootTarget,
+) {
+    witness.set_hash256_target(&target.header_root, header_root);
+    witness.set_hash256_target(&target.domain, domain);
+    witness.set_hash256_target(&target.signing_root, signing_root);
 }
 
 pub fn set_beacon_block_header_target<F: RichField, W: WitnessHashSha2<F>>(
@@ -112,18 +268,6 @@ pub fn set_beacon_block_header_target<F: RichField, W: WitnessHashSha2<F>>(
     witness.set_hash256_target(&target.proposer_index, &proposer_index_bytes);
 }
 
-pub fn set_signing_root_target<F: RichField, W: WitnessHashSha2<F>>(
-    witness: &mut W,
-    header_root: &[u8; 32],
-    domain: &[u8; 32],
-    signing_root: &[u8; 32],
-    target: &SigningRootTarget,
-) {
-    witness.set_hash256_target(&target.header_root, header_root);
-    witness.set_hash256_target(&target.domain, domain);
-    witness.set_hash256_target(&target.signing_root, signing_root);
-}
-
 pub fn set_virtual_finality_branch_target<F: RichField, W: WitnessHashSha2<F>>(
     witness: &mut W,
     finalized_header_root: &[u8; 32],
@@ -140,12 +284,67 @@ pub fn set_virtual_finality_branch_target<F: RichField, W: WitnessHashSha2<F>>(
     );
 }
 
+pub fn set_virtual_proof_target<F: RichField, W: WitnessHashSha2<F>>(
+    witness: &mut W,
+    signing_root: [u8; 32],
+    attested_header_root: [u8; 32],
+    domain: [u8; 32],
+    attested_slot: u64,
+    attested_proposer_index: u64,
+    attested_parent_root: [u8; 32],
+    attested_state_root: [u8; 32],
+    attested_body_root: [u8; 32],
+    finalized_header_root: [u8; 32],
+    finality_branch: [[u8; 32]; 6],
+    finalized_slot: u64,
+    finalized_proposer_index: u64,
+    finalized_parent_root: [u8; 32],
+    finalized_state_root: [u8; 32],
+    finalized_body_root: [u8; 32],
+    target: &ProofTarget,
+) {
+    set_signing_root_target(
+        witness,
+        &attested_header_root,
+        &domain,
+        &signing_root,
+        &target.signing_root_target,
+    );
+    set_beacon_block_header_target(
+        witness,
+        &attested_header_root,
+        attested_slot,
+        attested_proposer_index,
+        &attested_parent_root,
+        &attested_state_root,
+        &attested_body_root,
+        &target.attested_beacon_block_header_target,
+    );
+    set_beacon_block_header_target(
+        witness,
+        &finalized_header_root,
+        finalized_slot,
+        finalized_proposer_index,
+        &finalized_parent_root,
+        &finalized_state_root,
+        &finalized_body_root,
+        &target.finalized_beacon_block_header_target,
+    );
+    set_virtual_finality_branch_target(
+        witness,
+        &finalized_header_root,
+        &finality_branch,
+        &attested_state_root,
+        &target.finality_branch_target,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use crate::eth_ssz_containers::{
         add_virtual_beacon_block_header_target, add_virtual_signing_root_target,
-        set_beacon_block_header_target, set_signing_root_target,
-        set_virtual_finality_branch_target,
+        register_hash256_public_inputs, set_beacon_block_header_target, set_signing_root_target,
+        set_virtual_finality_branch_target, FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
     };
     use crate::merkle_tree_gadget::add_verify_merkle_proof_target;
     use plonky2::{
@@ -158,60 +357,6 @@ mod tests {
     };
 
     #[test]
-    fn test_beacon_block_header() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let beacon_block_header_target = add_virtual_beacon_block_header_target(&mut builder);
-        let num_gates = builder.num_gates();
-        let data = builder.build::<C>();
-        println!(
-            "circuit num_gates={}, quotient_degree_factor={}",
-            num_gates, data.common.quotient_degree_factor
-        );
-        let mut pw = PartialWitness::new();
-        let header_root = [
-            247, 238, 124, 76, 43, 57, 206, 203, 222, 133, 101, 42, 174, 190, 35, 178, 39, 63, 116,
-            54, 74, 140, 33, 180, 208, 188, 67, 89, 9, 221, 119, 145,
-        ];
-        let parent_root = [
-            251, 185, 224, 181, 217, 61, 112, 53, 238, 32, 107, 126, 238, 77, 208, 175, 207, 39,
-            19, 43, 185, 129, 90, 118, 128, 215, 15, 164, 2, 101, 156, 16,
-        ];
-        let state_root = [
-            186, 82, 121, 59, 237, 9, 80, 140, 75, 81, 16, 245, 93, 129, 213, 136, 55, 10, 63, 169,
-            21, 76, 47, 201, 209, 46, 149, 244, 138, 242, 65, 162,
-        ];
-        let body_root = [
-            106, 221, 189, 66, 29, 158, 48, 49, 154, 102, 227, 188, 21, 160, 11, 174, 213, 25, 64,
-            209, 113, 24, 176, 156, 83, 108, 138, 77, 68, 42, 239, 0,
-        ];
-        let slot = 6592564;
-        let proposer_index = 310913;
-        set_beacon_block_header_target(
-            &mut pw,
-            &header_root,
-            slot,
-            proposer_index,
-            &parent_root,
-            &state_root,
-            &body_root,
-            &beacon_block_header_target,
-        );
-
-        let start_time = std::time::Instant::now();
-
-        let proof = data.prove(pw).unwrap();
-        let duration_ms = start_time.elapsed().as_millis();
-        println!("proved in {}ms", duration_ms);
-        assert!(data.verify(proof).is_ok());
-    }
-
-    #[test]
     fn test_signing_root() {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
@@ -222,16 +367,26 @@ mod tests {
 
         let num_gates = builder.num_gates();
         let signing_root_target = add_virtual_signing_root_target(&mut builder);
+
+        // register public inputs
+        register_hash256_public_inputs(
+            &mut builder,
+            &vec![
+                signing_root_target.signing_root,
+                signing_root_target.header_root,
+                signing_root_target.domain,
+            ],
+        );
+
         let data = builder.build::<C>();
         println!(
             "circuit num_gates={}, quotient_degree_factor={}",
             num_gates, data.common.quotient_degree_factor
         );
 
-        let slot = 6592564;
-        let header_root = [
-            247, 238, 124, 76, 43, 57, 206, 203, 222, 133, 101, 42, 174, 190, 35, 178, 39, 63, 116,
-            54, 74, 140, 33, 180, 208, 188, 67, 89, 9, 221, 119, 145,
+        let attested_header_root = [
+            45, 77, 212, 84, 150, 46, 105, 130, 179, 135, 133, 212, 122, 108, 73, 91, 45, 214, 160,
+            140, 135, 132, 50, 138, 231, 168, 143, 75, 42, 25, 13, 56,
         ];
 
         let domain = [
@@ -239,17 +394,87 @@ mod tests {
             227, 176, 44, 0, 126, 0, 70, 210, 71, 44, 102, 149,
         ];
         let signing_root = [
-            113, 71, 84, 198, 232, 217, 127, 180, 112, 195, 214, 76, 153, 0, 243, 3, 118, 243, 160,
-            62, 35, 58, 60, 140, 144, 98, 71, 97, 13, 181, 182, 247,
+            114, 46, 13, 0, 130, 141, 69, 229, 6, 137, 227, 209, 63, 236, 236, 53, 67, 119, 8, 175,
+            250, 218, 233, 60, 30, 139, 40, 113, 120, 169, 166, 22,
         ];
 
         let mut pw = PartialWitness::new();
         set_signing_root_target(
             &mut pw,
-            &header_root,
+            &attested_header_root,
             &domain,
             &signing_root,
             &signing_root_target,
+        );
+
+        let start_time = std::time::Instant::now();
+
+        let proof = data.prove(pw).unwrap();
+        println!("proof.public_inputs {:?}", proof.public_inputs);
+        println!("data.verifier_only {:?}", data.verifier_only);
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_beacon_block_header() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let beacon_block_header_target = add_virtual_beacon_block_header_target(&mut builder);
+
+        // register public inputs
+        register_hash256_public_inputs(
+            &mut builder,
+            &vec![
+                beacon_block_header_target.header_root,
+                beacon_block_header_target.slot,
+                beacon_block_header_target.proposer_index,
+                beacon_block_header_target.parent_root,
+                beacon_block_header_target.state_root,
+                beacon_block_header_target.body_root,
+            ],
+        );
+
+        let num_gates = builder.num_gates();
+        let data = builder.build::<C>();
+        println!(
+            "circuit num_gates={}, quotient_degree_factor={}",
+            num_gates, data.common.quotient_degree_factor
+        );
+        let mut pw = PartialWitness::new();
+        let header_root = [
+            45, 77, 212, 84, 150, 46, 105, 130, 179, 135, 133, 212, 122, 108, 73, 91, 45, 214, 160,
+            140, 135, 132, 50, 138, 231, 168, 143, 75, 42, 25, 13, 56,
+        ];
+        let parent_root = [
+            83, 95, 167, 64, 47, 227, 70, 228, 57, 123, 161, 164, 51, 63, 52, 216, 95, 141, 127,
+            21, 55, 239, 134, 108, 188, 248, 16, 182, 33, 81, 179, 144,
+        ];
+        let state_root = [
+            34, 98, 151, 166, 168, 221, 147, 144, 81, 131, 90, 36, 198, 234, 171, 83, 62, 121, 54,
+            203, 247, 208, 159, 81, 92, 252, 219, 26, 197, 148, 13, 153,
+        ];
+        let body_root = [
+            141, 253, 157, 129, 148, 171, 105, 236, 221, 106, 218, 140, 98, 203, 197, 204, 199, 74,
+            79, 14, 237, 91, 116, 9, 161, 189, 180, 200, 128, 82, 157, 194,
+        ];
+        let slot = 6588507;
+        let proposer_index = 237719;
+        set_beacon_block_header_target(
+            &mut pw,
+            &header_root,
+            slot,
+            proposer_index,
+            &parent_root,
+            &state_root,
+            &body_root,
+            &beacon_block_header_target,
         );
 
         let start_time = std::time::Instant::now();
@@ -271,13 +496,18 @@ mod tests {
 
         let num_gates = builder.num_gates();
 
-        let finalized_header_index = 105;
-        let finalized_header_height = 6;
         let merkle_proof_target = add_verify_merkle_proof_target(
             &mut builder,
-            finalized_header_index,
-            finalized_header_height,
+            FINALIZED_HEADER_INDEX,
+            FINALIZED_HEADER_HEIGHT,
         );
+
+        // register public inputs
+        register_hash256_public_inputs(
+            &mut builder,
+            &vec![merkle_proof_target.leaf, merkle_proof_target.root],
+        );
+        register_hash256_public_inputs(&mut builder, &merkle_proof_target.proof);
 
         let data = builder.build::<C>();
         println!(
@@ -289,7 +519,7 @@ mod tests {
             115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21,
             58, 28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
         ];
-        let proof = [
+        let finality_branch = [
             [
                 64, 36, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0,
@@ -324,7 +554,7 @@ mod tests {
         set_virtual_finality_branch_target(
             &mut pw,
             &finalized_header_root,
-            &proof,
+            &finality_branch,
             &attested_state_root,
             &merkle_proof_target,
         );
