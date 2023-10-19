@@ -1,5 +1,5 @@
 use eth_lc_plonky2::eth_ssz_containers::{
-    add_virtual_proof_target, register_hash256_public_inputs, set_virtual_proof_target,
+    add_virtual_proof_target, register_hash256_public_inputs, set_proof_target,
 };
 use plonky2::{
     iop::witness::PartialWitness,
@@ -90,48 +90,57 @@ fn main() {
         64, 86, 208, 245, 151, 95, 215, 157, 65, 148, 16,
     ];
 
+    let contract_head = finalized_slot - 1; // contract state
+    let mut current_period_sync_committee_poseidon = [0u8; 32]; // contract state
+    current_period_sync_committee_poseidon[0] = 10;
+    let participation = 350;
+
     let target = add_virtual_proof_target(&mut builder);
 
     // register public inputs
-    register_hash256_public_inputs(
-        &mut builder,
-        &vec![
-            target.signing_root,
-            target.attested_header_root,
-            target.domain,
-            target.attested_slot,
-            target.attested_proposer_index,
-            target.attested_parent_root,
-            target.attested_state_root,
-            target.attested_body_root,
-            target.finalized_header_root,
-            target.finalized_slot,
-            target.finalized_proposer_index,
-            target.finalized_parent_root,
-            target.finalized_state_root,
-            target.finalized_body_root,
-        ],
-    );
-    register_hash256_public_inputs(&mut builder, &target.finality_branch);
+    // register_hash256_public_inputs(
+    //     &mut builder,
+    //     &vec![
+    //         target.signing_root,
+    //         target.attested_header_root,
+    //         target.domain,
+    //         target.attested_slot,
+    //         target.attested_proposer_index,
+    //         target.attested_parent_root,
+    //         target.attested_state_root,
+    //         target.attested_body_root,
+    //         target.finalized_header_root,
+    //         target.finalized_slot_h256,
+    //         target.finalized_proposer_index,
+    //         target.finalized_parent_root,
+    //         target.finalized_state_root,
+    //         target.finalized_body_root,
+    //         target.current_period_sync_committee_poseidon
+    //     ],
+    // );
+    // register_hash256_public_inputs(&mut builder, &target.finality_branch);
 
     let mut pw = PartialWitness::new();
-    set_virtual_proof_target(
+    set_proof_target(
         &mut pw,
-        signing_root,
-        attested_header_root,
-        domain,
+        &signing_root,
+        &attested_header_root,
+        &domain,
         attested_slot,
         attested_proposer_index,
-        attested_parent_root,
-        attested_state_root,
-        attested_body_root,
-        finalized_header_root,
-        finality_branch,
+        &attested_parent_root,
+        &attested_state_root,
+        &attested_body_root,
+        &finalized_header_root,
+        &finality_branch,
         finalized_slot,
         finalized_proposer_index,
-        finalized_parent_root,
-        finalized_state_root,
-        finalized_body_root,
+        &finalized_parent_root,
+        &finalized_state_root,
+        &finalized_body_root,
+        contract_head,
+        &current_period_sync_committee_poseidon,
+        participation,
         &target,
     );
 

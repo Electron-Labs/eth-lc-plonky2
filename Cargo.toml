@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 plonky2 = "0.1.4"
 plonky2_crypto = { git = "https://github.com/Electron-Labs/plonky2-crypto" }
+num = "0.4.1"
 
 [profile.release]
 opt-level = 3

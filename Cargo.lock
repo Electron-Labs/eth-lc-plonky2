@@ -208,6 +208,7 @@ checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
 name = "eth-lc-plonky2"
 version = "0.1.0"
 dependencies = [
+ "num",
  "plonky2",
  "plonky2_crypto",
 ]
