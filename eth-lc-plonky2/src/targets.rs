@@ -33,6 +33,15 @@ pub struct BeaconBlockHeaderTarget {
     pub body_root: Hash256Target,
 }
 
+pub struct PublicInputsCommitmentTarget {
+    pub public_inputs_commitment: Hash256Target,
+    pub attested_slot: Hash256Target,
+    pub finalized_slot: Hash256Target,
+    pub finalized_header_root: Hash256Target,
+    pub participation: Hash256Target,
+    pub contract_state_root: Hash256Target,
+}
+
 pub struct ProofTarget {
     pub signing_root: Hash256Target,
     pub attested_header_root: Hash256Target,
@@ -58,6 +67,7 @@ pub struct ProofTarget {
     pub finalized_beacon_block_header_target: BeaconBlockHeaderTarget,
     pub finality_branch_target: VerifyMerkleProofTarget,
     pub state_validity_target: StateValidityTarget,
+    // pub public_inputs_commitment: Hash256Target,
 }
 
 pub struct StateValidityTarget {
@@ -191,6 +201,42 @@ pub fn add_virtual_state_validity_target<F: RichField + Extendable<D>, const D: 
     }
 }
 
+pub fn add_virtual_public_inputs_commitment_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> PublicInputsCommitmentTarget {
+    let attested_slot = builder.add_virtual_hash256_target();
+    let finalized_slot = builder.add_virtual_hash256_target();
+    let finalized_header_root = builder.add_virtual_hash256_target();
+    let participation = builder.add_virtual_hash256_target();
+    let contract_state_root = builder.add_virtual_hash256_target();
+    let public_inputs_commitment = builder.add_virtual_hash256_target();
+
+    let merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 3);
+    builder.connect_hash256(attested_slot, merkle_tree_target.leaves[0]);
+    builder.connect_hash256(finalized_slot, merkle_tree_target.leaves[1]);
+    builder.connect_hash256(finalized_header_root, merkle_tree_target.leaves[2]);
+    builder.connect_hash256(participation, merkle_tree_target.leaves[3]);
+    builder.connect_hash256(contract_state_root, merkle_tree_target.leaves[4]);
+
+    let zero_u32 = builder.zero_u32();
+    for &target in merkle_tree_target.leaves[5..].iter() {
+        for &limb in target.iter() {
+            builder.connect_u32(limb, zero_u32);
+        }
+    }
+
+    builder.connect_hash256(public_inputs_commitment, merkle_tree_target.root);
+
+    PublicInputsCommitmentTarget {
+        public_inputs_commitment,
+        attested_slot,
+        finalized_slot,
+        finalized_header_root,
+        participation,
+        contract_state_root,
+    }
+}
+
 pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> ProofTarget {
@@ -222,6 +268,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     let finalized_slot_big = builder.add_virtual_biguint_target(8);
     let current_period_sync_committee_poseidon = builder.add_virtual_hash256_target();
     let participation = builder.add_virtual_biguint_target(1);
+    // let public_inputs_commitment = builder.add_virtual_hash256_target();
 
     // signing root
     builder.connect_hash256(signing_root, signing_root_target.signing_root);
@@ -294,6 +341,8 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     );
     builder.connect_biguint(&participation, &state_validity_target.participation);
 
+    // TODO: public inputs commitment
+
     ProofTarget {
         signing_root,
         attested_header_root,
@@ -319,6 +368,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         finalized_beacon_block_header_target,
         finality_branch_target,
         state_validity_target,
+        // public_inputs_commitment
     }
 }
 
@@ -397,6 +447,33 @@ pub fn set_state_validity_target<F: RichField, W: WitnessHashSha2<F>>(
     witness.set_biguint_target(&target.participation, &participation);
 }
 
+pub fn set_public_inputs_commitment_target<F: RichField, W: WitnessHashSha2<F>>(
+    witness: &mut W,
+    public_inputs_commitment: &[u8; 32],
+    attested_slot: u64,
+    finalized_slot: u64,
+    finalized_header_root: &[u8; 32],
+    participation: u64,
+    contract_state_root: &[u8; 32],
+    target: &PublicInputsCommitmentTarget,
+) {
+    let mut attested_slot_bytes = [0u8; 32];
+    attested_slot_bytes[0..8].copy_from_slice(&attested_slot.to_le_bytes());
+    witness.set_hash256_target(&target.attested_slot, &attested_slot_bytes);
+
+    let mut finalized_slot_bytes = [0u8; 32];
+    finalized_slot_bytes[0..8].copy_from_slice(&finalized_slot.to_le_bytes());
+    witness.set_hash256_target(&target.finalized_slot, &finalized_slot_bytes);
+
+    let mut participation_bytes = [0u8; 32];
+    participation_bytes[0..8].copy_from_slice(&participation.to_le_bytes());
+    witness.set_hash256_target(&target.participation, &participation_bytes);
+
+    witness.set_hash256_target(&target.public_inputs_commitment, &public_inputs_commitment);
+    witness.set_hash256_target(&target.finalized_header_root, &finalized_header_root);
+    witness.set_hash256_target(&target.contract_state_root, &contract_state_root);
+}
+
 pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     witness: &mut W,
     signing_root: &[u8; 32],
@@ -465,11 +542,12 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::eth_ssz_containers::{
-        add_virtual_beacon_block_header_target, add_virtual_signing_root_target,
-        add_virtual_state_validity_target, register_hash256_public_inputs,
-        set_beacon_block_header_target, set_finality_branch_target, set_signing_root_target,
-        set_state_validity_target, FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
+    use crate::targets::{
+        add_virtual_beacon_block_header_target, add_virtual_public_inputs_commitment_target,
+        add_virtual_signing_root_target, add_virtual_state_validity_target,
+        register_hash256_public_inputs, set_beacon_block_header_target, set_finality_branch_target,
+        set_public_inputs_commitment_target, set_signing_root_target, set_state_validity_target,
+        FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
     };
     use crate::merkle_tree_gadget::add_verify_merkle_proof_target;
     use plonky2::{
@@ -535,6 +613,8 @@ mod tests {
         let start_time = std::time::Instant::now();
 
         let proof = data.prove(pw).unwrap();
+        println!("proof.public_inputs {:?}", proof.public_inputs);
+        println!("data.verifier_only {:?}", data.verifier_only);
         let duration_ms = start_time.elapsed().as_millis();
         println!("proved in {}ms", duration_ms);
         assert!(data.verify(proof).is_ok());
@@ -726,4 +806,46 @@ mod tests {
         println!("proved in {}ms", duration_ms);
         assert!(data.verify(proof).is_ok());
     }
+
+    // TODO:
+    // fn test_public_inputs_commitment() {
+    //     const D: usize = 2;
+    //     type C = PoseidonGoldilocksConfig;
+    //     type F = <C as GenericConfig<D>>::F;
+
+    //     let config = CircuitConfig::standard_recursion_config();
+    //     let mut builder = CircuitBuilder::<F, D>::new(config);
+
+    //     let finalized_slot = 6588416;
+    //     let attested_slot = 6588507;
+    //     let finalized_header_root = [
+    //         115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21,
+    //         58, 28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
+    //     ];
+    //     let participation = 350;
+
+    //     let public_inputs_commitment_target =
+    //         add_virtual_public_inputs_commitment_target(&mut builder);
+
+    //     let data = builder.build::<C>();
+
+    //     // let mut pw = PartialWitness::new();
+    //     set_public_inputs_commitment_target(
+    //         &mut pw,
+    //         &public_inputs_commitment,
+    //         attested_slot,
+    //         finalized_slot,
+    //         &finalized_header_root,
+    //         participation,
+    //         &contract_state_root,
+    //         &public_inputs_commitment_target,
+    //     );
+
+    //     // let start_time = std::time::Instant::now();
+
+    //     // let proof = data.prove(pw).unwrap();
+    //     // let duration_ms = start_time.elapsed().as_millis();
+    //     // println!("proved in {}ms", duration_ms);
+    //     // assert!(data.verify(proof).is_ok());
+    // }
 }

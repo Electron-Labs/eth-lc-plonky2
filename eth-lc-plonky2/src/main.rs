@@ -1,4 +1,4 @@
-use eth_lc_plonky2::eth_ssz_containers::{
+use eth_lc_plonky2::targets::{
     add_virtual_proof_target, register_hash256_public_inputs, set_proof_target,
 };
 use plonky2::{
