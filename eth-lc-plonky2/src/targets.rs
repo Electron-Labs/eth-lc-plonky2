@@ -2,7 +2,7 @@ use crate::merkle_tree_gadget::{
     add_verify_merkle_proof_target, add_virtual_merkle_tree_sha256_target,
     set_verify_merkle_proof_target, VerifyMerkleProofTarget,
 };
-use num::{traits::FromBytes, BigUint, FromPrimitive};
+use num::{BigUint, FromPrimitive};
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::target::BoolTarget,
     plonk::circuit_builder::CircuitBuilder,
@@ -16,6 +16,7 @@ use plonky2_crypto::{
     nonnative::gadgets::biguint::WitnessBigUint,
     u32::{
         arithmetic_u32::{CircuitBuilderU32, U32Target},
+        binary_u32::CircuitBuilderBU32,
         witness::WitnessU32,
     },
 };
@@ -86,6 +87,13 @@ pub struct StateValidityTarget {
     pub participation: BigUintTarget,
 }
 
+pub struct TestTarget {
+    h1: Hash256Target,
+    h2: Hash256Target,
+    curr_contract_concat: HashInputTarget,
+    result: HashOutputTarget,
+}
+
 pub fn register_hash256_public_inputs<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     targets: &Vec<Hash256Target>,
@@ -115,7 +123,7 @@ pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: us
         }
     }
 
-    // builder.connect_hash256(signing_root, merkle_tree_target.root);
+    builder.connect_hash256(signing_root, merkle_tree_target.root);
     SigningRootTarget {
         signing_root,
         header_root,
@@ -211,13 +219,6 @@ pub fn add_virtual_state_validity_target<F: RichField + Extendable<D>, const D: 
         finalized_slot,
         participation,
     }
-}
-
-pub struct TestTarget {
-    h1: Hash256Target,
-    h2: Hash256Target,
-    curr_contract_concat: HashInputTarget,
-    result: HashOutputTarget,
 }
 
 pub fn add_virtual_test_target<F: RichField + Extendable<D>, const D: usize>(
@@ -342,12 +343,12 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
 
     let contract_state_target = add_virtual_contract_state_target(builder);
 
-    // signing root
+    // *** signing root ***
     builder.connect_hash256(signing_root, signing_root_target.signing_root);
     builder.connect_hash256(attested_header_root, signing_root_target.header_root);
     builder.connect_hash256(domain, signing_root_target.domain);
 
-    // attested block header
+    // *** attested block header ***
     builder.connect_hash256(
         attested_body_root,
         attested_beacon_block_header_target.body_root,
@@ -370,7 +371,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         attested_beacon_block_header_target.state_root,
     );
 
-    // // finalized block header
+    // *** finalized block header ***
     builder.connect_hash256(
         finalized_body_root,
         finalized_beacon_block_header_target.body_root,
@@ -393,14 +394,14 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         finalized_beacon_block_header_target.state_root,
     );
 
-    // finality branch
+    // *** finality branch ***
     builder.connect_hash256(finalized_header_root, finality_branch_target.leaf);
     builder.connect_hash256(attested_state_root, finality_branch_target.root);
     (0..FINALIZED_HEADER_HEIGHT)
         .into_iter()
         .for_each(|i| builder.connect_hash256(finality_branch[i], finality_branch_target.proof[i]));
 
-    // contract state validity
+    // *** contract state validity ***
     builder.connect_biguint(
         &curr_contract_slot,
         &state_validity_target.curr_contract_slot,
@@ -641,12 +642,10 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     participation: u64,
     target: &ProofTarget,
 ) {
-    // signing_root_target
     witness.set_hash256_target(&target.attested_header_root, attested_header_root);
     witness.set_hash256_target(&target.domain, domain);
     witness.set_hash256_target(&target.signing_root, signing_root);
 
-    // attested beacon_block_header_target
     witness.set_hash256_target(&target.attested_parent_root, attested_parent_root);
     witness.set_hash256_target(&target.attested_state_root, attested_state_root);
     witness.set_hash256_target(&target.attested_body_root, attested_body_root);
@@ -662,7 +661,6 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
         &attested_proposer_index_bytes,
     );
 
-    // finalized beacon_block_header_target
     witness.set_hash256_target(&target.finalized_header_root, finalized_header_root);
     witness.set_hash256_target(&target.finalized_parent_root, finalized_parent_root);
     witness.set_hash256_target(&target.finalized_state_root, finalized_state_root);
@@ -679,7 +677,6 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
         &finalized_proposer_index_bytes,
     );
 
-    // finality branch target
     (0..FINALIZED_HEADER_HEIGHT)
         .for_each(|i| witness.set_hash256_target(&target.finality_branch[i], &finality_branch[i]));
 
@@ -689,7 +686,6 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     let participation_big = BigUint::from_u64(participation).unwrap();
     witness.set_biguint_u32_be_target(&target.participation, &participation_big);
 
-    // contract state target
     witness.set_hash256_target(&target.curr_contract_state, &curr_contract_state);
     witness.set_hash256_target(&target.curr_contract_header, &curr_contract_header);
     witness.set_hash256_target(&target.curr_sync_committee_i, &curr_sync_committee_i);
