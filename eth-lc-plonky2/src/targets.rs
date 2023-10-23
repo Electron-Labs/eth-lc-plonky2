@@ -329,12 +329,17 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     let new_sync_committee_ii = builder.add_virtual_hash256_target();
     let participation = builder.add_virtual_biguint_target(1);
 
+    // 2. [altair] process_light_client_update: Verify Merkle branch of header
     let signing_root_target = add_virtual_signing_root_target(builder);
     let attested_beacon_block_header_target = add_virtual_beacon_block_header_target(builder);
     let finalized_beacon_block_header_target = add_virtual_beacon_block_header_target(builder);
     let finality_branch_target =
         add_verify_merkle_proof_target(builder, FINALIZED_HEADER_INDEX, FINALIZED_HEADER_HEIGHT);
+
+    // 1. [altair] process_light_client_update: Basic validation;
+    // 4. [altair] process_light_client_update: : More basic validation + check if 2/3 quorum is reached
     let state_validity_target = add_virtual_state_validity_target(&finalized_slot, builder);
+
     let contract_state_target = add_virtual_contract_state_target(builder);
 
     // signing root
@@ -675,7 +680,7 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     );
 
     // finality branch target
-    (0..6)
+    (0..FINALIZED_HEADER_HEIGHT)
         .for_each(|i| witness.set_hash256_target(&target.finality_branch[i], &finality_branch[i]));
 
     let curr_contract_slot_big = BigUint::from_u64(curr_contract_slot).unwrap();

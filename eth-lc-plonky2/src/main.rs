@@ -119,11 +119,8 @@ fn main() {
 
     let target = add_virtual_proof_target(&mut builder);
 
-    // let a = BigUint::from_u64(finalized_slot).unwrap();
-    // println!("a {:?}", a.lim);
-
     // register public inputs
-    // participation?
+    // TODO: participation?
     target
         .curr_contract_state
         .iter()
