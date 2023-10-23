@@ -124,17 +124,14 @@ fn main() {
 
     // register public inputs
     // participation?
-    // TODO: connect finalized_slot in validity and in beacon block header: one is biguint, other is Hash256
-    // register_hash256_public_inputs(
-    //     &mut builder,
-    //     &vec![
-    //         target.curr_contract_slot,
-    //         target.current_sync_committee_poseidon,
-    //         target.finalized_header_root,
-    //         target.finalized_slot_h256,
-    //         target.finalized_beacon_block_header_target.slot,
-    //     ],
-    // );
+    target
+        .curr_contract_state
+        .iter()
+        .for_each(|elm| builder.register_public_input(elm.0));
+    target
+        .new_contract_state
+        .iter()
+        .for_each(|elm| builder.register_public_input(elm.0));
 
     let mut pw = PartialWitness::new();
     set_proof_target(
