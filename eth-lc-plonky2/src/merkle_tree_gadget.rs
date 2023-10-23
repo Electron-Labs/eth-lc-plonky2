@@ -4,7 +4,7 @@ use plonky2::{
 };
 use plonky2_crypto::hash::{
     sha256::{CircuitBuilderHashSha2, WitnessHashSha2},
-    CircuitBuilderHash, Hash256Target, WitnessHash,
+    CircuitBuilderHash, Hash256Target, WitnessHash
 };
 
 pub struct MerkleTreeSha256Target {
