@@ -80,22 +80,9 @@ pub struct ProofTarget {
     pub participation: Hash256Target,
 }
 
-pub struct TestTarget {
-    h1: Hash256Target,
-    h2: Hash256Target,
-    curr_contract_concat: HashInputTarget,
-    result: HashOutputTarget,
-}
-
-pub fn register_hash256_public_inputs<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    targets: &Vec<Hash256Target>,
-) {
-    targets.iter().for_each(|target| {
-        target
-            .iter()
-            .for_each(|elm| builder.register_public_input(elm.0))
-    });
+pub struct BiguintHash256ConnectTarget {
+    big: BigUintTarget,
+    h256: Hash256Target,
 }
 
 pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: usize>(
@@ -157,22 +144,6 @@ pub fn add_virtual_beacon_block_header_target<F: RichField + Extendable<D>, cons
         parent_root,
         state_root,
         body_root,
-    }
-}
-
-pub fn add_virtual_test_target<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-) -> TestTarget {
-    let h1 = builder.add_virtual_hash256_target();
-    let h2 = builder.add_virtual_hash256_target();
-    let curr_contract_concat = builder.add_virtual_hash_input_target(2, 512);
-    let result = builder.hash_sha256(&curr_contract_concat);
-
-    TestTarget {
-        h1,
-        h2,
-        curr_contract_concat,
-        result,
     }
 }
 
@@ -392,6 +363,28 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     }
 }
 
+pub fn add_virtual_biguint_hash256_connect_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> BiguintHash256ConnectTarget {
+    let big = builder.add_virtual_biguint_target(8);
+    let h256 = builder.add_virtual_hash256_target();
+
+    for i in 0..8 {
+        let limb_big = big.get_limb(i);
+        let limb_h256 = h256[i];
+        let bit_targets_big = builder.split_le_base::<2>(limb_big.0, 32);
+        let bit_targets_h256 = builder.split_le_base::<2>(limb_h256.0, 32);
+        (0..4).for_each(|i| {
+            (0..8).for_each(|j| {
+                // TODO: currently checking at bit level, do it at byte level
+                builder.connect(bit_targets_big[8 * i + j], bit_targets_h256[24 - 8 * i + j])
+            })
+        });
+    }
+
+    BiguintHash256ConnectTarget { big, h256 }
+}
+
 pub fn set_signing_root_target<F: RichField, W: WitnessHashSha2<F>>(
     witness: &mut W,
     header_root: &[u8; 32],
@@ -506,23 +499,6 @@ pub fn set_contract_state_target<F: RichField, W: WitnessHashSha2<F>>(
     );
 }
 
-pub fn set_test_target<F: RichField, W: WitnessHashSha2<F>>(
-    witness: &mut W,
-    h1: &[u8; 32],
-    h2: &[u8; 32],
-    result: &[u8; 32],
-    contract_test_target: &TestTarget,
-) {
-    witness.set_hash256_target(&contract_test_target.h1, &h1);
-    witness.set_hash256_target(&contract_test_target.h2, &h2);
-    let mut concat = [0u8; 64];
-    concat[..32].copy_from_slice(h1);
-    concat[32..].copy_from_slice(h2);
-
-    witness.set_sha256_input_target(&contract_test_target.curr_contract_concat, &concat);
-    witness.set_sha256_output_target(&contract_test_target.result, result);
-}
-
 pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     witness: &mut W,
     signing_root: &[u8; 32],
@@ -610,10 +586,10 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
 mod tests {
     use crate::merkle_tree_gadget::add_verify_merkle_proof_target;
     use crate::targets::{
-        add_virtual_beacon_block_header_target, add_virtual_contract_state_target,
-        add_virtual_signing_root_target, add_virtual_test_target, register_hash256_public_inputs,
+        add_virtual_beacon_block_header_target, add_virtual_biguint_hash256_connect_target,
+        add_virtual_contract_state_target, add_virtual_signing_root_target,
         set_beacon_block_header_target, set_contract_state_target, set_finality_branch_target,
-        set_signing_root_target, set_test_target, FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
+        set_signing_root_target, FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
     };
     use num::{BigUint, FromPrimitive};
     use plonky2::{
@@ -645,16 +621,6 @@ mod tests {
 
         let num_gates = builder.num_gates();
         let signing_root_target = add_virtual_signing_root_target(&mut builder);
-
-        // register public inputs
-        register_hash256_public_inputs(
-            &mut builder,
-            &vec![
-                signing_root_target.signing_root,
-                signing_root_target.header_root,
-                signing_root_target.domain,
-            ],
-        );
 
         let data = builder.build::<C>();
         println!(
@@ -703,19 +669,6 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let beacon_block_header_target = add_virtual_beacon_block_header_target(&mut builder);
-
-        // register public inputs
-        register_hash256_public_inputs(
-            &mut builder,
-            &vec![
-                beacon_block_header_target.header_root,
-                beacon_block_header_target.slot,
-                beacon_block_header_target.proposer_index,
-                beacon_block_header_target.parent_root,
-                beacon_block_header_target.state_root,
-                beacon_block_header_target.body_root,
-            ],
-        );
 
         let num_gates = builder.num_gates();
         let data = builder.build::<C>();
@@ -777,13 +730,6 @@ mod tests {
             FINALIZED_HEADER_INDEX,
             FINALIZED_HEADER_HEIGHT,
         );
-
-        // register public inputs
-        register_hash256_public_inputs(
-            &mut builder,
-            &vec![merkle_proof_target.leaf, merkle_proof_target.root],
-        );
-        register_hash256_public_inputs(&mut builder, &merkle_proof_target.proof);
 
         let data = builder.build::<C>();
         println!(
@@ -911,7 +857,7 @@ mod tests {
     }
 
     #[test]
-    fn test_test() {
+    fn test_biguint_hash256_target_connect() {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -919,25 +865,20 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
-        let test_target = add_virtual_test_target(&mut builder);
+        let slot: u64 = 25000;
+
+        let biguint_hash256_connect_target =
+            add_virtual_biguint_hash256_connect_target(&mut builder);
+        let mut pw = PartialWitness::new();
+
+        let mut slot_bytes = [0u8; 32];
+        slot_bytes[0..8].copy_from_slice(&slot.to_le_bytes());
+        pw.set_hash256_target(&biguint_hash256_connect_target.h256, &slot_bytes);
+
+        let big_slot = BigUint::from_u64(slot).unwrap();
+        pw.set_biguint_target(&biguint_hash256_connect_target.big, &big_slot);
 
         let data = builder.build::<C>();
-
-        let h1 = [
-            115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21,
-            58, 28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
-        ];
-        let h2 = [
-            0, 136, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0,
-        ];
-        let result = [
-            88, 90, 212, 231, 212, 182, 152, 141, 1, 138, 129, 89, 238, 200, 194, 66, 255, 210,
-            102, 153, 28, 207, 56, 26, 151, 213, 163, 237, 119, 148, 167, 123,
-        ];
-
-        let mut pw = PartialWitness::new();
-        set_test_target(&mut pw, &h1, &h2, &result, &test_target);
 
         let start_time = std::time::Instant::now();
 

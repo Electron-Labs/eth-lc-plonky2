@@ -1,5 +1,5 @@
 use eth_lc_plonky2::targets::{
-    add_virtual_proof_target, register_hash256_public_inputs, set_proof_target,
+    add_virtual_proof_target, set_proof_target,
 };
 use num::{BigUint, FromPrimitive};
 use plonky2::{
