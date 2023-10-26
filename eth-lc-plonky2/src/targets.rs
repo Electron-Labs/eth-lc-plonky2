@@ -70,21 +70,14 @@ pub struct ProofTarget {
     pub finalized_state_root: Hash256Target,
     pub finalized_body_root: Hash256Target,
     pub curr_contract_state: Hash256Target,
-    pub curr_contract_slot: BigUintTarget,
+    pub curr_contract_slot: Hash256Target,
     pub curr_contract_header: Hash256Target,
-    pub curr_sync_committee_i: Hash256Target,
+    pub curr_sync_committee_i: Hash256Target, // TODO: rename; add comments
     pub curr_sync_committee_ii: Hash256Target,
     pub new_contract_state: Hash256Target,
     pub new_sync_committee_i: Hash256Target,
     pub new_sync_committee_ii: Hash256Target,
-    pub participation: BigUintTarget,
-}
-
-pub struct StateValidityTarget {
-    pub curr_contract_slot: BigUintTarget,
-    pub finalized_slot: BigUintTarget,
-    // pub current_sync_committee_poseidon: Hash256Target,
-    pub participation: BigUintTarget,
+    pub participation: Hash256Target,
 }
 
 pub struct TestTarget {
@@ -164,60 +157,6 @@ pub fn add_virtual_beacon_block_header_target<F: RichField + Extendable<D>, cons
         parent_root,
         state_root,
         body_root,
-    }
-}
-
-pub fn add_virtual_state_validity_target<F: RichField + Extendable<D>, const D: usize>(
-    slot_h256: &Hash256Target,
-    builder: &mut CircuitBuilder<F, D>,
-) -> StateValidityTarget {
-    // TODO: num limbs?
-    let curr_contract_slot = builder.add_virtual_biguint_target(8);
-    let finalized_slot = builder.add_virtual_biguint_target(8);
-    // let current_sync_committee_poseidon = builder.add_virtual_hash256_target();
-    let participation = builder.add_virtual_biguint_target(1);
-
-    let one = builder.one();
-    let zero = builder.zero();
-    let mut result: BoolTarget;
-
-    (0..8).for_each(|i| builder.connect_u32(finalized_slot.limbs[i], slot_h256[i]));
-
-    // TODO: cmp_biguint doesn't work with `set_biguint_u32_be_target`
-
-    // // checks if  curr_contract_slot <= finalized_slot
-    // result = builder.cmp_biguint(&curr_contract_slot, &finalized_slot);
-    // builder.connect(result.target, one);
-
-    // // let mut is_committee_zero = builder.constant_bool(true);
-
-    // // ensure syncCommitteePoseidon for current period is set
-    // // TODO: don't need this: instead check if the new slot is from the curr or next period?
-    // // current_sync_committee_poseidon.iter().for_each(|elm| {
-    // //     result = builder.is_equal(elm.0, zero);
-    // //     is_committee_zero = builder.and(is_committee_zero, result);
-    // // });
-
-    // // builder.connect(is_committee_zero.target, zero);
-
-    // // ensure participation is atleast MIN_SYNC_COMMITTEE_PARTICIPANTS
-    // // checks if MIN_SYNC_COMMITTEE_PARTICIPANTS <= participation
-    // let min_sync_committee_participants_target =
-    //     builder.constant_biguint(&BigUint::from_usize(MIN_SYNC_COMMITTEE_PARTICIPANTS).unwrap());
-    // result = builder.cmp_biguint(&min_sync_committee_participants_target, &participation);
-    // builder.connect(result.target, one);
-
-    // // ensure enough participants
-    // // checks if participation <= FINALITY_THRESHOLD
-    // let finality_threshold_target =
-    //     builder.constant_biguint(&BigUint::from_usize(FINALITY_THRESHOLD).unwrap());
-    // result = builder.cmp_biguint(&participation, &finality_threshold_target);
-    // builder.connect(result.target, zero);
-
-    StateValidityTarget {
-        curr_contract_slot,
-        finalized_slot,
-        participation,
     }
 }
 
@@ -322,13 +261,13 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
 
     let curr_contract_state = builder.add_virtual_hash256_target();
     let curr_contract_header = builder.add_virtual_hash256_target();
-    let curr_contract_slot = builder.add_virtual_biguint_target(8);
+    let curr_contract_slot = builder.add_virtual_hash256_target();
     let curr_sync_committee_i = builder.add_virtual_hash256_target();
     let curr_sync_committee_ii = builder.add_virtual_hash256_target();
     let new_contract_state = builder.add_virtual_hash256_target();
     let new_sync_committee_i = builder.add_virtual_hash256_target();
     let new_sync_committee_ii = builder.add_virtual_hash256_target();
-    let participation = builder.add_virtual_biguint_target(1);
+    let participation = builder.add_virtual_hash256_target();
 
     // 2. [altair] process_light_client_update: Verify Merkle branch of header
     let signing_root_target = add_virtual_signing_root_target(builder);
@@ -336,10 +275,6 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     let finalized_beacon_block_header_target = add_virtual_beacon_block_header_target(builder);
     let finality_branch_target =
         add_verify_merkle_proof_target(builder, FINALIZED_HEADER_INDEX, FINALIZED_HEADER_HEIGHT);
-
-    // 1. [altair] process_light_client_update: Basic validation;
-    // 4. [altair] process_light_client_update: : More basic validation + check if 2/3 quorum is reached
-    let state_validity_target = add_virtual_state_validity_target(&finalized_slot, builder);
 
     let contract_state_target = add_virtual_contract_state_target(builder);
 
@@ -401,24 +336,12 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         .into_iter()
         .for_each(|i| builder.connect_hash256(finality_branch[i], finality_branch_target.proof[i]));
 
-    // *** contract state validity ***
-    builder.connect_biguint(
-        &curr_contract_slot,
-        &state_validity_target.curr_contract_slot,
-    );
-    builder.connect_biguint(&participation, &state_validity_target.participation);
-
-    // // contract state
+    // *** contract state ***
     builder.connect_hash256(
         curr_contract_header,
         contract_state_target.curr_contract_header,
     );
-    (0..8).for_each(|i| {
-        builder.connect_u32(
-            contract_state_target.curr_contract_slot[i],
-            curr_contract_slot.limbs[i],
-        )
-    });
+    builder.connect_hash256(curr_contract_slot, contract_state_target.curr_contract_slot);
     builder.connect_hash256(
         curr_sync_committee_i,
         contract_state_target.curr_sync_committee_i,
@@ -519,20 +442,6 @@ pub fn set_finality_branch_target<F: RichField, W: WitnessHashSha2<F>>(
         attested_state_root,
         target,
     );
-}
-
-pub fn set_state_validity_target<F: RichField, W: WitnessHashSha2<F>>(
-    witness: &mut W,
-    curr_contract_slot: u64,
-    // current_sync_committee_poseidon: &[u8; 32],
-    participation: u64,
-    target: &StateValidityTarget,
-) {
-    let head_big = BigUint::from_u64(curr_contract_slot).unwrap();
-    witness.set_biguint_u32_be_target(&target.curr_contract_slot, &head_big);
-
-    let participation = BigUint::from_u64(participation).unwrap();
-    witness.set_biguint_u32_be_target(&target.participation, &participation);
 }
 
 pub fn set_contract_state_target<F: RichField, W: WitnessHashSha2<F>>(
@@ -680,11 +589,13 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     (0..FINALIZED_HEADER_HEIGHT)
         .for_each(|i| witness.set_hash256_target(&target.finality_branch[i], &finality_branch[i]));
 
-    let curr_contract_slot_big = BigUint::from_u64(curr_contract_slot).unwrap();
-    witness.set_biguint_u32_be_target(&target.curr_contract_slot, &curr_contract_slot_big);
+    let mut curr_contract_slot_bytes = [0u8; 32];
+    curr_contract_slot_bytes[0..8].copy_from_slice(&curr_contract_slot.to_le_bytes());
+    witness.set_hash256_target(&target.curr_contract_slot, &curr_contract_slot_bytes);
 
-    let participation_big = BigUint::from_u64(participation).unwrap();
-    witness.set_biguint_u32_be_target(&target.participation, &participation_big);
+    let mut participation_bytes = [0u8; 32];
+    participation_bytes[0..8].copy_from_slice(&participation.to_le_bytes());
+    witness.set_hash256_target(&target.participation, &participation_bytes);
 
     witness.set_hash256_target(&target.curr_contract_state, &curr_contract_state);
     witness.set_hash256_target(&target.curr_contract_header, &curr_contract_header);
@@ -700,11 +611,9 @@ mod tests {
     use crate::merkle_tree_gadget::add_verify_merkle_proof_target;
     use crate::targets::{
         add_virtual_beacon_block_header_target, add_virtual_contract_state_target,
-        add_virtual_signing_root_target, add_virtual_state_validity_target,
-        add_virtual_test_target, register_hash256_public_inputs, set_beacon_block_header_target,
-        set_contract_state_target, set_finality_branch_target, set_signing_root_target,
-        set_state_validity_target, set_test_target, FINALIZED_HEADER_HEIGHT,
-        FINALIZED_HEADER_INDEX,
+        add_virtual_signing_root_target, add_virtual_test_target, register_hash256_public_inputs,
+        set_beacon_block_header_target, set_contract_state_target, set_finality_branch_target,
+        set_signing_root_target, set_test_target, FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
     };
     use num::{BigUint, FromPrimitive};
     use plonky2::{
@@ -925,47 +834,6 @@ mod tests {
             &attested_state_root,
             &merkle_proof_target,
         );
-
-        let start_time = std::time::Instant::now();
-
-        let proof = data.prove(pw).unwrap();
-        let duration_ms = start_time.elapsed().as_millis();
-        println!("proved in {}ms", duration_ms);
-        assert!(data.verify(proof).is_ok());
-    }
-
-    #[test]
-    fn test_state_validity() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
-
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-
-        let finalized_slot: u64 = 6588416;
-        let curr_contract_slot = finalized_slot - 1;
-        // let mut current_sync_committee_poseidon = [0u8; 32];
-        // current_sync_committee_poseidon[0] = 10;
-        let participation = 350;
-
-        let slot_h256 = builder.add_virtual_hash256_target();
-        let mut slot_bytes = [0u8; 32];
-        slot_bytes[0..8].copy_from_slice(&finalized_slot.to_le_bytes());
-
-        let state_validity_target = add_virtual_state_validity_target(&slot_h256, &mut builder);
-
-        let mut pw = PartialWitness::new();
-        set_state_validity_target(
-            &mut pw,
-            curr_contract_slot,
-            // &current_sync_committee_poseidon,
-            participation,
-            &state_validity_target,
-        );
-        pw.set_hash256_target(&slot_h256, &slot_bytes);
-
-        let data = builder.build::<C>();
 
         let start_time = std::time::Instant::now();
 
