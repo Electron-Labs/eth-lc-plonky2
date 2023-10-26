@@ -11,6 +11,7 @@ use plonky2::{
     },
 };
 
+// TODO: readd state validity circuit
 fn main() {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;

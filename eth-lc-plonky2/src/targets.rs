@@ -11,7 +11,7 @@ use plonky2_crypto::{
     biguint::{BigUintTarget, CircuitBuilderBiguint},
     hash::{
         sha256::{CircuitBuilderHashSha2, WitnessHashSha2},
-        CircuitBuilderHash, Hash256Target, HashInputTarget, HashOutputTarget, WitnessHash,
+        CircuitBuilderHash, Hash256Target, WitnessHash,
     },
     nonnative::gadgets::biguint::WitnessBigUint,
     u32::{
@@ -25,6 +25,7 @@ const FINALIZED_HEADER_INDEX: usize = 105;
 const FINALIZED_HEADER_HEIGHT: usize = 6;
 const MIN_SYNC_COMMITTEE_PARTICIPANTS: usize = 10;
 const FINALITY_THRESHOLD: usize = 342;
+const N_SLOTS_PER_PERIOD: usize = 8192;
 
 pub struct SigningRootTarget {
     pub signing_root: Hash256Target,
@@ -51,6 +52,20 @@ pub struct ContractStateTarget {
     pub new_contract_slot: Hash256Target,
     pub new_sync_committee_i: Hash256Target,
     pub new_sync_committee_ii: Hash256Target,
+}
+
+pub struct IsEqualBigUint {
+    big1: BigUintTarget,
+    big2: BigUintTarget,
+    result: BoolTarget,
+}
+
+pub struct CurrSynCommitteeTarget {
+    pub curr_contract_slot: BigUintTarget,
+    pub attested_slot: BigUintTarget,
+    pub curr_sync_committee_i: Hash256Target,
+    pub curr_sync_committee_ii: Hash256Target,
+    pub curr_sync_committee: Hash256Target,
 }
 
 pub struct ProofTarget {
@@ -202,6 +217,78 @@ pub fn add_virtual_contract_state_target<F: RichField + Extendable<D>, const D: 
         new_sync_committee_i,
         new_sync_committee_ii,
     }
+}
+
+// TODO: move to different file
+pub fn add_is_equal_big_uint_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> IsEqualBigUint {
+    let big1 = builder.add_virtual_biguint_target(8);
+    let big2 = builder.add_virtual_biguint_target(8);
+    let mut result = builder.constant_bool(true);
+
+    let mut is_equal_temp = builder.constant_bool(true);
+    (0..8).for_each(|i| {
+        is_equal_temp = builder.is_equal(big1.limbs[i].0, big2.limbs[i].0);
+        result = builder.and(result, is_equal_temp);
+    });
+
+    IsEqualBigUint { big1, big2, result }
+}
+
+pub fn add_virtual_curr_sync_committee_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> CurrSynCommitteeTarget {
+    let attested_slot = builder.add_virtual_biguint_target(8);
+    let curr_contract_slot = builder.add_virtual_biguint_target(8);
+    let curr_sync_committee_i = builder.add_virtual_hash256_target();
+    let curr_sync_committee_ii = builder.add_virtual_hash256_target();
+    let curr_sync_committee = builder.add_virtual_hash256_target();
+
+    let one_bool_target = builder.constant_bool(true);
+    let one_big_target = builder.constant_biguint(&BigUint::from_u16(1).unwrap());
+    let n_slot_big = BigUint::from_usize(N_SLOTS_PER_PERIOD).unwrap();
+    let n_slot_target = builder.constant_biguint(&n_slot_big);
+
+    let (attested_period, _) = builder.div_rem_biguint(&attested_slot, &n_slot_target);
+    let (curr_period, _) = builder.div_rem_biguint(&curr_contract_slot, &n_slot_target);
+    let next_period = builder.add_biguint(&curr_period, &one_big_target);
+
+    let is_attested_from_curr_period = add_is_equal_big_uint_target(builder);
+    builder.connect_biguint(&is_attested_from_curr_period.big1, &attested_period);
+    builder.connect_biguint(&is_attested_from_curr_period.big2, &curr_period);
+
+    let is_attested_from_next_period = add_is_equal_big_uint_target(builder);
+    builder.connect_biguint(&is_attested_from_next_period.big1, &attested_period);
+    builder.connect_biguint(&is_attested_from_next_period.big2, &next_period);
+
+    // ensure the attested slot is either from curr period or next period
+    let from_curr_or_next_period = builder.or(
+        is_attested_from_curr_period.result,
+        is_attested_from_next_period.result,
+    );
+    builder.connect(from_curr_or_next_period.target, one_bool_target.target);
+
+    // set curr_sync_committee (corresponding to attested_period)
+    (0..8).for_each(|i| {
+        let if_result = builder._if(
+            is_attested_from_curr_period.result,
+            curr_sync_committee_i[i].0,
+            curr_sync_committee_ii[i].0,
+        );
+        builder.connect(curr_sync_committee[i].0, if_result)
+    });
+
+    CurrSynCommitteeTarget {
+        attested_slot,
+        curr_contract_slot,
+        curr_sync_committee_i,
+        curr_sync_committee_ii,
+        curr_sync_committee,
+    }
+
+    // TODO: https://github.com/Electron-Labs/plonky2_ed25519/blob/master/src/gadgets/curve.rs#L367
+    // see curve_conditional_add
 }
 
 pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
@@ -499,6 +586,40 @@ pub fn set_contract_state_target<F: RichField, W: WitnessHashSha2<F>>(
     );
 }
 
+pub fn set_curr_sync_committee_target<F: RichField, W: WitnessHashSha2<F>>(
+    witness: &mut W,
+    attested_slot: u64,
+    curr_contract_slot: u64,
+    curr_sync_committee_i: &[u8; 32],
+    curr_sync_committee_ii: &[u8; 32],
+    curr_sync_committee: &[u8; 32],
+    curr_sync_committee_target: CurrSynCommitteeTarget,
+) {
+    let curr_contract_slot_big = BigUint::from_u64(curr_contract_slot).unwrap();
+    let attested_slot_big = BigUint::from_u64(attested_slot).unwrap();
+
+    witness.set_biguint_target(
+        &curr_sync_committee_target.attested_slot,
+        &attested_slot_big,
+    );
+    witness.set_biguint_target(
+        &curr_sync_committee_target.curr_contract_slot,
+        &curr_contract_slot_big,
+    );
+    witness.set_hash256_target(
+        &curr_sync_committee_target.curr_sync_committee_i,
+        &curr_sync_committee_i,
+    );
+    witness.set_hash256_target(
+        &curr_sync_committee_target.curr_sync_committee_ii,
+        &curr_sync_committee_ii,
+    );
+    witness.set_hash256_target(
+        &curr_sync_committee_target.curr_sync_committee,
+        &curr_sync_committee,
+    );
+}
+
 pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     witness: &mut W,
     signing_root: &[u8; 32],
@@ -586,10 +707,12 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
 mod tests {
     use crate::merkle_tree_gadget::add_verify_merkle_proof_target;
     use crate::targets::{
-        add_virtual_beacon_block_header_target, add_virtual_biguint_hash256_connect_target,
-        add_virtual_contract_state_target, add_virtual_signing_root_target,
-        set_beacon_block_header_target, set_contract_state_target, set_finality_branch_target,
-        set_signing_root_target, FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX,
+        add_is_equal_big_uint_target, add_virtual_beacon_block_header_target,
+        add_virtual_biguint_hash256_connect_target, add_virtual_contract_state_target,
+        add_virtual_curr_sync_committee_target, add_virtual_signing_root_target,
+        set_beacon_block_header_target, set_contract_state_target, set_curr_sync_committee_target,
+        set_finality_branch_target, set_signing_root_target, FINALIZED_HEADER_HEIGHT,
+        FINALIZED_HEADER_INDEX,
     };
     use num::{BigUint, FromPrimitive};
     use plonky2::{
@@ -857,7 +980,7 @@ mod tests {
     }
 
     #[test]
-    fn test_biguint_hash256_target_connect() {
+    fn test_biguint_hash256_connect_target() {
         const D: usize = 2;
         type C = PoseidonGoldilocksConfig;
         type F = <C as GenericConfig<D>>::F;
@@ -877,6 +1000,108 @@ mod tests {
 
         let big_slot = BigUint::from_u64(slot).unwrap();
         pw.set_biguint_target(&biguint_hash256_connect_target.big, &big_slot);
+
+        let data = builder.build::<C>();
+
+        let start_time = std::time::Instant::now();
+
+        let proof = data.prove(pw).unwrap();
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_is_equal_big_uint_target() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let num1 = 6594800;
+        let num2 = 6594800;
+        let num3 = 6594800 + 1;
+
+        let is_equal_big_uint_target1 = add_is_equal_big_uint_target(&mut builder);
+        let is_equal_big_uint_target2 = add_is_equal_big_uint_target(&mut builder);
+        let mut pw = PartialWitness::new();
+
+        let big1_value = BigUint::from_u64(num1).unwrap();
+        let big2_value = BigUint::from_u64(num2).unwrap();
+        let big3_value = BigUint::from_u64(num3).unwrap();
+        pw.set_biguint_target(&is_equal_big_uint_target1.big1, &big1_value);
+        pw.set_biguint_target(&is_equal_big_uint_target1.big2, &big2_value);
+
+        pw.set_biguint_target(&is_equal_big_uint_target2.big1, &big2_value);
+        pw.set_biguint_target(&is_equal_big_uint_target2.big2, &big3_value);
+
+        let one_bool = builder.constant_bool(true);
+        let zero_bool = builder.constant_bool(false);
+        builder.connect(is_equal_big_uint_target1.result.target, one_bool.target);
+        builder.connect(is_equal_big_uint_target2.result.target, zero_bool.target);
+
+        let data = builder.build::<C>();
+
+        let start_time = std::time::Instant::now();
+
+        let proof = data.prove(pw).unwrap();
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_curr_sync_committee_target() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let curr_contract_slot = 6588416;
+        let attested_slot1 = 6588417;
+        let attested_slot2 = 6594800;
+        let attested_slot3 = 6604800;
+        let mut curr_sync_committee_i = [0u8; 32];
+        curr_sync_committee_i[0] = 10;
+        let mut curr_sync_committee_ii = [0u8; 32];
+        curr_sync_committee_ii[20] = 70;
+
+        let curr_sync_committee_target1 = add_virtual_curr_sync_committee_target(&mut builder);
+        let curr_sync_committee_target2 = add_virtual_curr_sync_committee_target(&mut builder);
+        let curr_sync_committee_target3 = add_virtual_curr_sync_committee_target(&mut builder);
+        let mut pw = PartialWitness::new();
+
+        set_curr_sync_committee_target(
+            &mut pw,
+            attested_slot1,
+            curr_contract_slot,
+            &curr_sync_committee_i,
+            &curr_sync_committee_ii,
+            &curr_sync_committee_i,
+            curr_sync_committee_target1,
+        );
+        set_curr_sync_committee_target(
+            &mut pw,
+            attested_slot2,
+            curr_contract_slot,
+            &curr_sync_committee_i,
+            &curr_sync_committee_ii,
+            &curr_sync_committee_ii,
+            curr_sync_committee_target2,
+        );
+        set_curr_sync_committee_target(
+            &mut pw,
+            attested_slot1,
+            curr_contract_slot,
+            &curr_sync_committee_i,
+            &curr_sync_committee_ii,
+            &curr_sync_committee_ii,
+            curr_sync_committee_target3,
+        );
 
         let data = builder.build::<C>();
 
