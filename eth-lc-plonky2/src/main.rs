@@ -10,7 +10,6 @@ use plonky2::{
 };
 
 // TODO: readd state validity circuit
-// TODO: update proof target
 fn main() {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -97,16 +96,45 @@ fn main() {
     ];
     let cur_contract_slot = 6588416;
 
-    let mut cur_contract_sync_committee_i = [0u8; 32];
-    cur_contract_sync_committee_i[0] = 10;
-    let mut cur_contract_sync_committee_ii = [0u8; 32];
-    cur_contract_sync_committee_ii[20] = 70;
-    let participation = 350;
-
-    let mut new_contract_sync_committee_i = [0u8; 32];
-    new_contract_sync_committee_i[0] = 10;
-    let mut new_contract_sync_committee_ii = [0u8; 32];
-    new_contract_sync_committee_ii[20] = 70;
+    let cur_contract_sync_committee_i = [
+        188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128, 239,
+        35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
+    ];
+    let cur_contract_sync_committee_ii = [
+        91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98, 134,
+        54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+    ];
+    let new_contract_sync_committee_i = [
+        91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98, 134,
+        54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+    ];
+    let new_contract_sync_committee_ii = [
+        83, 234, 237, 227, 27, 56, 198, 90, 51, 53, 231, 79, 205, 86, 243, 22, 78, 64, 231, 34,
+        181, 64, 117, 148, 168, 70, 125, 103, 132, 248, 196, 20,
+    ];
+    let participation = 433;
+    let new_contract_sync_committee_ii_branch = [
+        [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ],
+        [
+            192, 176, 252, 182, 85, 11, 154, 145, 221, 98, 155, 155, 158, 60, 173, 241, 213, 54,
+            131, 211, 119, 194, 7, 157, 33, 187, 197, 222, 227, 216, 54, 98,
+        ],
+        [
+            165, 36, 105, 106, 20, 36, 145, 228, 172, 136, 6, 141, 170, 197, 46, 200, 192, 152, 92,
+            238, 87, 130, 126, 101, 160, 54, 142, 169, 71, 0, 39, 176,
+        ],
+        [
+            4, 17, 122, 94, 130, 198, 53, 220, 161, 116, 98, 62, 225, 44, 232, 99, 6, 93, 128, 0,
+            173, 254, 166, 231, 209, 149, 127, 31, 129, 251, 37, 168,
+        ],
+        [
+            176, 81, 237, 96, 109, 253, 159, 172, 93, 93, 4, 53, 163, 64, 13, 153, 245, 72, 150,
+            186, 226, 112, 59, 248, 20, 12, 219, 91, 31, 163, 108, 199,
+        ],
+    ];
 
     let cur_contract_state = [
         184, 125, 255, 223, 248, 134, 92, 238, 197, 185, 188, 16, 90, 177, 15, 38, 36, 56, 168,
@@ -119,8 +147,8 @@ fn main() {
 
     let target = add_virtual_proof_target(&mut builder);
 
+    // TODO: participation: hwo is it verified?
     // register public inputs
-    // TODO: participation?
     target
         .cur_contract_state
         .iter()
@@ -157,6 +185,7 @@ fn main() {
         &new_contract_sync_committee_i,
         &new_contract_sync_committee_ii,
         participation,
+        &new_contract_sync_committee_ii_branch,
         &target,
     );
 

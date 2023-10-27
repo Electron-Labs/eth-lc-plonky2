@@ -1,7 +1,8 @@
 use crate::merkle_tree_gadget::{
-    add_verify_merkle_proof_target, add_virtual_merkle_tree_sha256_target,
-    set_verify_merkle_proof_target, VerifyMerkleProofTarget,
+    add_verify_merkle_proof_conditional_target, add_verify_merkle_proof_target,
+    add_virtual_merkle_tree_sha256_target,
 };
+use crate::utils::{add_is_equal_big_uint_target, add_virtual_biguint_hash256_connect_target};
 use num::{BigUint, FromPrimitive};
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::target::BoolTarget,
@@ -9,20 +10,15 @@ use plonky2::{
 };
 use plonky2_crypto::{
     biguint::{BigUintTarget, CircuitBuilderBiguint},
-    hash::{
-        sha256::{CircuitBuilderHashSha2, WitnessHashSha2},
-        CircuitBuilderHash, Hash256Target, WitnessHash,
-    },
+    hash::{sha256::WitnessHashSha2, CircuitBuilderHash, Hash256Target, WitnessHash},
     nonnative::gadgets::biguint::WitnessBigUint,
-    u32::{
-        arithmetic_u32::{CircuitBuilderU32, U32Target},
-        binary_u32::CircuitBuilderBU32,
-        witness::WitnessU32,
-    },
+    u32::arithmetic_u32::CircuitBuilderU32,
 };
 
 const FINALIZED_HEADER_INDEX: usize = 105;
 const FINALIZED_HEADER_HEIGHT: usize = 6;
+const SYNC_COMMITTEE_HEIGHT: usize = 5;
+const SYNC_COMMITTEE_INDEX: usize = 55;
 const MIN_SYNC_COMMITTEE_PARTICIPANTS: usize = 10;
 const FINALITY_THRESHOLD: usize = 342;
 const N_SLOTS_PER_PERIOD: usize = 8192;
@@ -46,26 +42,31 @@ pub struct ContractStateTarget {
     pub new_contract_state: Hash256Target,
     pub cur_contract_header: Hash256Target,
     pub cur_contract_slot: Hash256Target,
-    pub cur_contract_sync_committee_i: Hash256Target, // sync committee corresponding to the period of `cur_contract_slot `
-    pub cur_contract_sync_committee_ii: Hash256Target, // sync committee corresponding to the period next of `cur_contract_slot`
+    pub cur_contract_sync_committee_i: Hash256Target, // sync committee ssz corresponding to the period of `cur_contract_slot `
+    pub cur_contract_sync_committee_ii: Hash256Target, // sync committee ssz corresponding to the period next of `cur_contract_slot`
     pub new_contract_header: Hash256Target,
     pub new_contract_slot: Hash256Target,
-    pub new_contract_sync_committee_i: Hash256Target, // sync committee corresponding the to period of `new_contract_slot`
-    pub new_contract_sync_committee_ii: Hash256Target, // sync committee corresponding to the period next of `new_contract_slot`
+    pub new_contract_sync_committee_i: Hash256Target, // sync committee ssz corresponding the to period of `new_contract_slot`
+    pub new_contract_sync_committee_ii: Hash256Target, // sync committee ssz corresponding to the period next of `new_contract_slot`
 }
 
-pub struct IsEqualBigUint {
-    big1: BigUintTarget,
-    big2: BigUintTarget,
-    result: BoolTarget,
-}
-
-pub struct CurSynCommitteeTarget {
-    pub cur_contract_slot: BigUintTarget,
-    pub attested_slot: BigUintTarget,
+pub struct CurSyncCommitteeTarget {
+    pub cur_contract_slot_big: BigUintTarget,
+    pub attested_slot_big: BigUintTarget,
     pub cur_contract_sync_committee_i: Hash256Target,
     pub cur_contract_sync_committee_ii: Hash256Target,
+    pub is_attested_from_next_period: BoolTarget,
     pub sync_committee_for_attested_slot: Hash256Target,
+}
+
+pub struct UpdateSyncCommitteeTarget {
+    pub is_attested_from_next_period: BoolTarget,
+    pub cur_contract_sync_committee_i: Hash256Target,
+    pub cur_contract_sync_committee_ii: Hash256Target,
+    pub new_contract_sync_committee_i: Hash256Target,
+    pub new_contract_sync_committee_ii: Hash256Target,
+    pub finalized_state_root: Hash256Target,
+    pub new_contract_sync_committee_ii_branch: Vec<Hash256Target>,
 }
 
 pub struct ProofTarget {
@@ -93,11 +94,9 @@ pub struct ProofTarget {
     pub new_contract_sync_committee_i: Hash256Target,
     pub new_contract_sync_committee_ii: Hash256Target,
     pub participation: Hash256Target,
-}
-
-pub struct BigUintHash256ConnectTarget {
-    big: BigUintTarget,
-    h256: Hash256Target,
+    pub cur_contract_slot_big: BigUintTarget,
+    pub attested_slot_big: BigUintTarget,
+    pub new_contract_sync_committee_ii_branch: Vec<Hash256Target>,
 }
 
 pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: usize>(
@@ -231,28 +230,11 @@ pub fn add_virtual_contract_state_target<F: RichField + Extendable<D>, const D: 
     }
 }
 
-// TODO: move to different file
-pub fn add_is_equal_big_uint_target<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-) -> IsEqualBigUint {
-    let big1 = builder.add_virtual_biguint_target(8);
-    let big2 = builder.add_virtual_biguint_target(8);
-    let mut result = builder.constant_bool(true);
-
-    let mut is_equal_temp = builder.constant_bool(true);
-    (0..8).for_each(|i| {
-        is_equal_temp = builder.is_equal(big1.limbs[i].0, big2.limbs[i].0);
-        result = builder.and(result, is_equal_temp);
-    });
-
-    IsEqualBigUint { big1, big2, result }
-}
-
 pub fn add_virtual_sync_committee_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-) -> CurSynCommitteeTarget {
-    let attested_slot = builder.add_virtual_biguint_target(8);
-    let cur_contract_slot = builder.add_virtual_biguint_target(8);
+) -> CurSyncCommitteeTarget {
+    let attested_slot_big = builder.add_virtual_biguint_target(8);
+    let cur_contract_slot_big = builder.add_virtual_biguint_target(8);
     let cur_contract_sync_committee_i = builder.add_virtual_hash256_target();
     let cur_contract_sync_committee_ii = builder.add_virtual_hash256_target();
     let sync_committee_for_attested_slot = builder.add_virtual_hash256_target();
@@ -262,8 +244,8 @@ pub fn add_virtual_sync_committee_target<F: RichField + Extendable<D>, const D: 
     let n_slot_big = BigUint::from_usize(N_SLOTS_PER_PERIOD).unwrap();
     let n_slot_target = builder.constant_biguint(&n_slot_big);
 
-    let (attested_period, _) = builder.div_rem_biguint(&attested_slot, &n_slot_target);
-    let (cur_period, _) = builder.div_rem_biguint(&cur_contract_slot, &n_slot_target);
+    let (attested_period, _) = builder.div_rem_biguint(&attested_slot_big, &n_slot_target);
+    let (cur_period, _) = builder.div_rem_biguint(&cur_contract_slot_big, &n_slot_target);
     let next_period = builder.add_biguint(&cur_period, &one_big_target);
 
     let is_attested_from_cur_period = add_is_equal_big_uint_target(builder);
@@ -291,38 +273,88 @@ pub fn add_virtual_sync_committee_target<F: RichField + Extendable<D>, const D: 
         builder.connect(sync_committee_for_attested_slot[i].0, if_result)
     });
 
-    CurSynCommitteeTarget {
-        attested_slot,
-        cur_contract_slot,
+    CurSyncCommitteeTarget {
+        attested_slot_big,
+        cur_contract_slot_big,
         cur_contract_sync_committee_i,
         cur_contract_sync_committee_ii,
+        is_attested_from_next_period: is_attested_from_next_period.result,
         sync_committee_for_attested_slot,
     }
-
-    // TODO: https://github.com/Electron-Labs/plonky2_ed25519/blob/master/src/gadgets/curve.rs#L367
-    // see curve_conditional_add
 }
 
-pub fn add_virtual_biguint_hash256_connect_target<F: RichField + Extendable<D>, const D: usize>(
+pub fn add_virtual_update_sync_committe_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-) -> BigUintHash256ConnectTarget {
-    let big = builder.add_virtual_biguint_target(8);
-    let h256 = builder.add_virtual_hash256_target();
+) -> UpdateSyncCommitteeTarget {
+    let is_attested_from_next_period = builder.add_virtual_bool_target_safe();
+    let cur_contract_sync_committee_i = builder.add_virtual_hash256_target();
+    let cur_contract_sync_committee_ii = builder.add_virtual_hash256_target();
+    let new_contract_sync_committee_i = builder.add_virtual_hash256_target();
+    let new_contract_sync_committee_ii = builder.add_virtual_hash256_target();
+    let finalized_state_root = builder.add_virtual_hash256_target();
+    let new_contract_sync_committee_ii_branch = (0..SYNC_COMMITTEE_HEIGHT)
+        .map(|_| builder.add_virtual_hash256_target())
+        .collect::<Vec<Hash256Target>>();
 
-    for i in 0..8 {
-        let limb_big = big.get_limb(i);
-        let limb_h256 = h256[i];
-        let bit_targets_big = builder.split_le_base::<2>(limb_big.0, 32);
-        let bit_targets_h256 = builder.split_le_base::<2>(limb_h256.0, 32);
-        (0..4).for_each(|i| {
-            (0..8).for_each(|j| {
-                // TODO: currently checking at bit level, do it at byte level
-                builder.connect(bit_targets_big[8 * i + j], bit_targets_h256[24 - 8 * i + j])
-            })
-        });
+    let sync_committee_branch_target = add_verify_merkle_proof_conditional_target(
+        builder,
+        SYNC_COMMITTEE_INDEX,
+        SYNC_COMMITTEE_HEIGHT,
+    );
+
+    // conditional merkle leaf verification
+    builder.connect_hash256(
+        sync_committee_branch_target.leaf,
+        new_contract_sync_committee_ii,
+    );
+    (0..SYNC_COMMITTEE_HEIGHT).into_iter().for_each(|i| {
+        builder.connect_hash256(
+            sync_committee_branch_target.proof[i],
+            new_contract_sync_committee_ii_branch[i],
+        )
+    });
+    builder.connect_hash256(sync_committee_branch_target.root, finalized_state_root);
+    builder.connect(
+        sync_committee_branch_target.v.target,
+        is_attested_from_next_period.target,
+    );
+
+    // `cur_contract_sync_committee_i` and `new_contract_sync_committee_i` should not differ if attested slot is not from the next period
+    let is_attested_not_from_next_period = builder.not(is_attested_from_next_period);
+    (0..8).for_each(|i| {
+        let a = builder.mul(
+            cur_contract_sync_committee_i[i].0,
+            is_attested_not_from_next_period.target,
+        );
+        let b = builder.mul(
+            new_contract_sync_committee_i[i].0,
+            is_attested_not_from_next_period.target,
+        );
+        builder.connect(a, b);
+    });
+
+    // `new_contract_sync_committee_i` should be equal to `cur_contract_sync_committee_ii` if attested slot is from the next period
+    (0..8).for_each(|i| {
+        let a = builder.mul(
+            cur_contract_sync_committee_ii[i].0,
+            is_attested_from_next_period.target,
+        );
+        let b = builder.mul(
+            new_contract_sync_committee_i[i].0,
+            is_attested_from_next_period.target,
+        );
+        builder.connect(a, b);
+    });
+
+    UpdateSyncCommitteeTarget {
+        is_attested_from_next_period,
+        cur_contract_sync_committee_i,
+        cur_contract_sync_committee_ii,
+        new_contract_sync_committee_i,
+        new_contract_sync_committee_ii,
+        finalized_state_root,
+        new_contract_sync_committee_ii_branch,
     }
-
-    BigUintHash256ConnectTarget { big, h256 }
 }
 
 pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
@@ -355,6 +387,11 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     let new_contract_sync_committee_i = builder.add_virtual_hash256_target();
     let new_contract_sync_committee_ii = builder.add_virtual_hash256_target();
     let participation = builder.add_virtual_hash256_target();
+    let cur_contract_slot_big = builder.add_virtual_biguint_target(8);
+    let attested_slot_big = builder.add_virtual_biguint_target(8);
+    let new_contract_sync_committee_ii_branch = (0..SYNC_COMMITTEE_HEIGHT)
+        .map(|_| builder.add_virtual_hash256_target())
+        .collect::<Vec<Hash256Target>>();
 
     // 2. [altair] process_light_client_update: Verify Merkle branch of header
     let signing_root_target = add_virtual_signing_root_target(builder);
@@ -364,6 +401,8 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         add_verify_merkle_proof_target(builder, FINALIZED_HEADER_INDEX, FINALIZED_HEADER_HEIGHT);
 
     let contract_state_target = add_virtual_contract_state_target(builder);
+    let sync_committee_target = add_virtual_sync_committee_target(builder);
+    let update_sync_committe_target = add_virtual_update_sync_committe_target(builder);
 
     // *** signing root ***
     builder.connect_hash256(signing_root, signing_root_target.signing_root);
@@ -451,6 +490,66 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         contract_state_target.new_contract_sync_committee_ii,
     );
 
+    // *** sync committee ***
+    builder.connect_biguint(
+        &sync_committee_target.cur_contract_slot_big,
+        &cur_contract_slot_big,
+    );
+    builder.connect_biguint(&sync_committee_target.attested_slot_big, &attested_slot_big);
+    builder.connect_hash256(
+        sync_committee_target.cur_contract_sync_committee_i,
+        cur_contract_sync_committee_i,
+    );
+    builder.connect_hash256(
+        sync_committee_target.cur_contract_sync_committee_ii,
+        cur_contract_sync_committee_ii,
+    );
+    // use sync_committee_target.sync_committee_for_attested_slot for signature verification
+
+    // connect `cur_contract_slot_big` and `cur_contract_slot`
+    let connect_contract_slot = add_virtual_biguint_hash256_connect_target(builder);
+    builder.connect_hash256(connect_contract_slot.h256, cur_contract_slot);
+    builder.connect_biguint(&connect_contract_slot.big, &cur_contract_slot_big);
+
+    // connect `attested_slot_big` and `attested_slot`
+    let connect_attested_slot = add_virtual_biguint_hash256_connect_target(builder);
+    builder.connect_hash256(connect_attested_slot.h256, attested_slot);
+    builder.connect_biguint(&connect_attested_slot.big, &attested_slot_big);
+
+    // *** update sync committee ***
+    builder.connect(
+        update_sync_committe_target
+            .is_attested_from_next_period
+            .target,
+        sync_committee_target.is_attested_from_next_period.target,
+    );
+    builder.connect_hash256(
+        update_sync_committe_target.cur_contract_sync_committee_i,
+        cur_contract_sync_committee_i,
+    );
+    builder.connect_hash256(
+        update_sync_committe_target.cur_contract_sync_committee_ii,
+        cur_contract_sync_committee_ii,
+    );
+    builder.connect_hash256(
+        update_sync_committe_target.new_contract_sync_committee_i,
+        new_contract_sync_committee_i,
+    );
+    builder.connect_hash256(
+        update_sync_committe_target.new_contract_sync_committee_ii,
+        new_contract_sync_committee_ii,
+    );
+    builder.connect_hash256(
+        update_sync_committe_target.finalized_state_root,
+        finalized_state_root,
+    );
+    (0..SYNC_COMMITTEE_HEIGHT).into_iter().for_each(|i| {
+        builder.connect_hash256(
+            update_sync_committe_target.new_contract_sync_committee_ii_branch[i],
+            new_contract_sync_committee_ii_branch[i],
+        )
+    });
+
     ProofTarget {
         signing_root,
         attested_header_root,
@@ -476,19 +575,10 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         new_contract_sync_committee_i,
         new_contract_sync_committee_ii,
         participation,
+        cur_contract_slot_big,
+        attested_slot_big,
+        new_contract_sync_committee_ii_branch,
     }
-}
-
-pub fn set_signing_root_target<F: RichField, W: WitnessHashSha2<F>>(
-    witness: &mut W,
-    header_root: &[u8; 32],
-    domain: &[u8; 32],
-    signing_root: &[u8; 32],
-    target: &SigningRootTarget,
-) {
-    witness.set_hash256_target(&target.header_root, header_root);
-    witness.set_hash256_target(&target.domain, domain);
-    witness.set_hash256_target(&target.signing_root, signing_root);
 }
 
 pub fn set_beacon_block_header_target<F: RichField, W: WitnessHashSha2<F>>(
@@ -513,22 +603,6 @@ pub fn set_beacon_block_header_target<F: RichField, W: WitnessHashSha2<F>>(
     let mut proposer_index_bytes = [0u8; 32];
     proposer_index_bytes[0..8].copy_from_slice(&proposer_index.to_le_bytes());
     witness.set_hash256_target(&target.proposer_index, &proposer_index_bytes);
-}
-
-pub fn set_finality_branch_target<F: RichField, W: WitnessHashSha2<F>>(
-    witness: &mut W,
-    finalized_header_root: &[u8; 32],
-    proof: &[[u8; 32]; 6],
-    attested_state_root: &[u8; 32],
-    target: &VerifyMerkleProofTarget,
-) {
-    set_verify_merkle_proof_target(
-        witness,
-        finalized_header_root,
-        &proof.to_vec(),
-        attested_state_root,
-        target,
-    );
 }
 
 pub fn set_contract_state_target<F: RichField, W: WitnessHashSha2<F>>(
@@ -600,14 +674,14 @@ pub fn set_sync_committee_target<F: RichField, W: WitnessHashSha2<F>>(
     cur_contract_sync_committee_i: &[u8; 32],
     cur_contract_sync_committee_ii: &[u8; 32],
     sync_committee_for_attested_slot: &[u8; 32],
-    sync_committee_target: CurSynCommitteeTarget,
+    sync_committee_target: CurSyncCommitteeTarget,
 ) {
     let cur_contract_slot_big = BigUint::from_u64(cur_contract_slot).unwrap();
     let attested_slot_big = BigUint::from_u64(attested_slot).unwrap();
 
-    witness.set_biguint_target(&sync_committee_target.attested_slot, &attested_slot_big);
+    witness.set_biguint_target(&sync_committee_target.attested_slot_big, &attested_slot_big);
     witness.set_biguint_target(
-        &sync_committee_target.cur_contract_slot,
+        &sync_committee_target.cur_contract_slot_big,
         &cur_contract_slot_big,
     );
     witness.set_hash256_target(
@@ -650,6 +724,7 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     new_contract_sync_committee_i: &[u8; 32],
     new_contract_sync_committee_ii: &[u8; 32],
     participation: u64,
+    new_contract_sync_committee_ii_branch: &[[u8; 32]; SYNC_COMMITTEE_HEIGHT],
     target: &ProofTarget,
 ) {
     witness.set_hash256_target(&target.attested_header_root, attested_header_root);
@@ -694,10 +769,6 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     cur_contract_slot_bytes[0..8].copy_from_slice(&cur_contract_slot.to_le_bytes());
     witness.set_hash256_target(&target.cur_contract_slot, &cur_contract_slot_bytes);
 
-    let mut participation_bytes = [0u8; 32];
-    participation_bytes[0..8].copy_from_slice(&participation.to_le_bytes());
-    witness.set_hash256_target(&target.participation, &participation_bytes);
-
     witness.set_hash256_target(&target.cur_contract_state, &cur_contract_state);
     witness.set_hash256_target(&target.cur_contract_header, &cur_contract_header);
     witness.set_hash256_target(
@@ -717,20 +788,39 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
         &target.new_contract_sync_committee_ii,
         &new_contract_sync_committee_ii,
     );
+
+    let mut participation_bytes = [0u8; 32];
+    participation_bytes[0..8].copy_from_slice(&participation.to_le_bytes());
+    witness.set_hash256_target(&target.participation, &participation_bytes);
+
+    let attested_slot_big_value = BigUint::from_u64(attested_slot).unwrap();
+    let cur_contract_slot_big_value = BigUint::from_u64(cur_contract_slot).unwrap();
+    witness.set_biguint_target(&target.cur_contract_slot_big, &cur_contract_slot_big_value);
+    witness.set_biguint_target(&target.attested_slot_big, &attested_slot_big_value);
+
+    (0..SYNC_COMMITTEE_HEIGHT).for_each(|i| {
+        witness.set_hash256_target(
+            &target.new_contract_sync_committee_ii_branch[i],
+            &new_contract_sync_committee_ii_branch[i],
+        )
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::merkle_tree_gadget::add_verify_merkle_proof_target;
+    use crate::merkle_tree_gadget::{
+        add_verify_merkle_proof_target, set_verify_merkle_proof_target,
+    };
     use crate::targets::{
         add_is_equal_big_uint_target, add_virtual_beacon_block_header_target,
         add_virtual_biguint_hash256_connect_target, add_virtual_contract_state_target,
         add_virtual_signing_root_target, add_virtual_sync_committee_target,
-        set_beacon_block_header_target, set_contract_state_target, set_finality_branch_target,
-        set_signing_root_target, set_sync_committee_target, FINALIZED_HEADER_HEIGHT,
-        FINALIZED_HEADER_INDEX,
+        add_virtual_update_sync_committe_target, set_beacon_block_header_target,
+        set_contract_state_target, set_sync_committee_target, FINALIZED_HEADER_HEIGHT,
+        FINALIZED_HEADER_INDEX, SYNC_COMMITTEE_HEIGHT,
     };
     use num::{BigUint, FromPrimitive};
+    use plonky2::iop::witness::WitnessWrite;
     use plonky2::{
         iop::witness::PartialWitness,
         plonk::{
@@ -739,15 +829,7 @@ mod tests {
             config::{GenericConfig, PoseidonGoldilocksConfig},
         },
     };
-    use plonky2_crypto::{
-        biguint::{BigUintTarget, CircuitBuilderBiguint},
-        hash::{CircuitBuilderHash, WitnessHash},
-        nonnative::gadgets::biguint::WitnessBigUint,
-        u32::{
-            arithmetic_u32::{CircuitBuilderU32, U32Target},
-            witness::WitnessU32,
-        },
-    };
+    use plonky2_crypto::{hash::WitnessHash, nonnative::gadgets::biguint::WitnessBigUint};
 
     #[test]
     fn test_signing_root() {
@@ -782,13 +864,9 @@ mod tests {
         ];
 
         let mut pw = PartialWitness::new();
-        set_signing_root_target(
-            &mut pw,
-            &attested_header_root,
-            &domain,
-            &signing_root,
-            &signing_root_target,
-        );
+        pw.set_hash256_target(&signing_root_target.header_root, &attested_header_root);
+        pw.set_hash256_target(&signing_root_target.domain, &domain);
+        pw.set_hash256_target(&signing_root_target.signing_root, &signing_root);
 
         let start_time = std::time::Instant::now();
 
@@ -912,10 +990,10 @@ mod tests {
         ];
 
         let mut pw = PartialWitness::new();
-        set_finality_branch_target(
+        set_verify_merkle_proof_target(
             &mut pw,
             &finalized_header_root,
-            &finality_branch,
+            &finality_branch.to_vec(),
             &attested_state_root,
             &merkle_proof_target,
         );
@@ -1107,6 +1185,181 @@ mod tests {
             &cur_contract_sync_committee_ii,
             sync_committee_target2,
         );
+
+        let data = builder.build::<C>();
+
+        let start_time = std::time::Instant::now();
+
+        let proof = data.prove(pw).unwrap();
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_update_sync_committe_target_when_is_attested_from_next_period_true() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let mut pw = PartialWitness::new();
+
+        let is_attested_from_next_period = true;
+        let cur_contract_sync_committee_i = [
+            188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128,
+            239, 35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
+        ];
+        let cur_contract_sync_committee_ii = [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ];
+        let new_contract_sync_committee_i = [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ];
+        let new_contract_sync_committee_ii = [
+            83, 234, 237, 227, 27, 56, 198, 90, 51, 53, 231, 79, 205, 86, 243, 22, 78, 64, 231, 34,
+            181, 64, 117, 148, 168, 70, 125, 103, 132, 248, 196, 20,
+        ];
+        let finalized_state_root = [
+            255, 194, 217, 140, 47, 98, 13, 224, 31, 61, 140, 226, 182, 49, 32, 135, 209, 115, 106,
+            168, 199, 20, 150, 211, 204, 128, 11, 53, 4, 57, 189, 214,
+        ];
+        let new_contract_sync_committee_ii_branch = [
+            [
+                91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120,
+                98, 134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+            ],
+            [
+                192, 176, 252, 182, 85, 11, 154, 145, 221, 98, 155, 155, 158, 60, 173, 241, 213,
+                54, 131, 211, 119, 194, 7, 157, 33, 187, 197, 222, 227, 216, 54, 98,
+            ],
+            [
+                165, 36, 105, 106, 20, 36, 145, 228, 172, 136, 6, 141, 170, 197, 46, 200, 192, 152,
+                92, 238, 87, 130, 126, 101, 160, 54, 142, 169, 71, 0, 39, 176,
+            ],
+            [
+                4, 17, 122, 94, 130, 198, 53, 220, 161, 116, 98, 62, 225, 44, 232, 99, 6, 93, 128,
+                0, 173, 254, 166, 231, 209, 149, 127, 31, 129, 251, 37, 168,
+            ],
+            [
+                176, 81, 237, 96, 109, 253, 159, 172, 93, 93, 4, 53, 163, 64, 13, 153, 245, 72,
+                150, 186, 226, 112, 59, 248, 20, 12, 219, 91, 31, 163, 108, 199,
+            ],
+        ];
+
+        let update_sync_committe_target = add_virtual_update_sync_committe_target(&mut builder);
+        pw.set_bool_target(
+            update_sync_committe_target.is_attested_from_next_period,
+            is_attested_from_next_period,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.cur_contract_sync_committee_i,
+            &cur_contract_sync_committee_i,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.cur_contract_sync_committee_ii,
+            &cur_contract_sync_committee_ii,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.new_contract_sync_committee_i,
+            &new_contract_sync_committee_i,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.new_contract_sync_committee_ii,
+            &new_contract_sync_committee_ii,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.finalized_state_root,
+            &finalized_state_root,
+        );
+        for (i, elm) in update_sync_committe_target
+            .new_contract_sync_committee_ii_branch
+            .iter()
+            .enumerate()
+        {
+            pw.set_hash256_target(elm, &new_contract_sync_committee_ii_branch[i]);
+        }
+
+        let data = builder.build::<C>();
+
+        let start_time = std::time::Instant::now();
+
+        let proof = data.prove(pw).unwrap();
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_update_sync_committe_target_when_is_attested_from_next_period_false() {
+        const D: usize = 2;
+        type C = PoseidonGoldilocksConfig;
+        type F = <C as GenericConfig<D>>::F;
+
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let mut pw = PartialWitness::new();
+
+        let is_attested_from_next_period = false;
+        let cur_contract_sync_committee_i = [
+            188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128,
+            239, 35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
+        ];
+        let cur_contract_sync_committee_ii = [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ];
+        let new_contract_sync_committee_i = [
+            188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128,
+            239, 35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
+        ];
+        let new_contract_sync_committee_ii = [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ];
+
+        // can be any value like 0
+        let finalized_state_root = [0; 32];
+        // can be any value like 0
+        let new_contract_sync_committee_ii_branch = [[0; 32]; SYNC_COMMITTEE_HEIGHT];
+
+        let update_sync_committe_target = add_virtual_update_sync_committe_target(&mut builder);
+        pw.set_bool_target(
+            update_sync_committe_target.is_attested_from_next_period,
+            is_attested_from_next_period,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.cur_contract_sync_committee_i,
+            &cur_contract_sync_committee_i,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.cur_contract_sync_committee_ii,
+            &cur_contract_sync_committee_ii,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.new_contract_sync_committee_i,
+            &new_contract_sync_committee_i,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.new_contract_sync_committee_ii,
+            &new_contract_sync_committee_ii,
+        );
+        pw.set_hash256_target(
+            &update_sync_committe_target.finalized_state_root,
+            &finalized_state_root,
+        );
+        for (i, elm) in update_sync_committe_target
+            .new_contract_sync_committee_ii_branch
+            .iter()
+            .enumerate()
+        {
+            pw.set_hash256_target(elm, &new_contract_sync_committee_ii_branch[i]);
+        }
 
         let data = builder.build::<C>();
 

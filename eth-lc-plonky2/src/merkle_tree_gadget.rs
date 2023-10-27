@@ -1,10 +1,10 @@
 use plonky2::{
-    field::extension::Extendable, hash::hash_types::RichField,
+    field::extension::Extendable, hash::hash_types::RichField, iop::target::BoolTarget,
     plonk::circuit_builder::CircuitBuilder,
 };
 use plonky2_crypto::hash::{
     sha256::{CircuitBuilderHashSha2, WitnessHashSha2},
-    CircuitBuilderHash, Hash256Target, WitnessHash
+    CircuitBuilderHash, Hash256Target, WitnessHash,
 };
 
 pub struct MerkleTreeSha256Target {
@@ -16,6 +16,13 @@ pub struct VerifyMerkleProofTarget {
     pub leaf: Hash256Target,
     pub proof: Vec<Hash256Target>,
     pub root: Hash256Target,
+}
+
+pub struct VerifyMerkleProofConditionalTarget {
+    pub leaf: Hash256Target,
+    pub proof: Vec<Hash256Target>,
+    pub root: Hash256Target,
+    pub v: BoolTarget, // whether to verify or not
 }
 
 pub fn compute_next_layer<F: RichField + Extendable<D>, const D: usize>(
@@ -77,6 +84,49 @@ pub fn add_verify_merkle_proof_target<F: RichField + Extendable<D>, const D: usi
     builder.connect_hash256(next_hash, root);
 
     VerifyMerkleProofTarget { leaf, proof, root }
+}
+
+pub fn add_verify_merkle_proof_conditional_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    leaf_index: usize,
+    height: usize,
+) -> VerifyMerkleProofConditionalTarget {
+    let root = builder.add_virtual_hash256_target();
+    let mut proof: Vec<Hash256Target> = Vec::new();
+    let leaf = builder.add_virtual_hash256_target();
+    let next_hash_v = builder.add_virtual_hash256_target();
+    let root_v = builder.add_virtual_hash256_target();
+    let v = builder.add_virtual_bool_target_safe();
+
+    let mut curr_index = leaf_index.clone();
+    let mut next_hash = leaf;
+
+    for i in 0..height {
+        proof.push(builder.add_virtual_hash256_target());
+
+        if curr_index % 2 == 0 {
+            next_hash = builder.two_to_one_sha256(next_hash, proof[i]);
+        } else {
+            next_hash = builder.two_to_one_sha256(proof[i], next_hash);
+        }
+        curr_index = curr_index / 2;
+    }
+
+    (0..8).for_each(|i| {
+        let temp1 = builder.mul(v.target, next_hash[i].0);
+        let temp2 = builder.mul(v.target, root[i].0);
+        builder.connect(next_hash_v[i].0, temp1);
+        builder.connect(root_v[i].0, temp2);
+    });
+
+    builder.connect_hash256(next_hash_v, root_v);
+
+    VerifyMerkleProofConditionalTarget {
+        leaf,
+        proof,
+        root,
+        v,
+    }
 }
 
 pub fn set_verify_merkle_proof_target<F: RichField, W: WitnessHashSha2<F>>(
