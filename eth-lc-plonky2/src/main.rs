@@ -1,6 +1,4 @@
-use eth_lc_plonky2::targets::{
-    add_virtual_proof_target, set_proof_target,
-};
+use eth_lc_plonky2::targets::{add_virtual_proof_target, set_proof_target};
 use num::{BigUint, FromPrimitive};
 use plonky2::{
     iop::witness::PartialWitness,
@@ -12,6 +10,7 @@ use plonky2::{
 };
 
 // TODO: readd state validity circuit
+// TODO: update proof target
 fn main() {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -92,24 +91,24 @@ fn main() {
         196, 60, 171, 172, 154, 28, 11, 196, 32, 10, 148, 81,
     ];
 
-    let curr_contract_header = [
+    let cur_contract_header = [
         115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21, 58,
         28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
     ];
-    let curr_contract_slot = 6588416;
+    let cur_contract_slot = 6588416;
 
-    let mut curr_sync_committee_i = [0u8; 32];
-    curr_sync_committee_i[0] = 10;
-    let mut curr_sync_committee_ii = [0u8; 32];
-    curr_sync_committee_ii[20] = 70;
+    let mut cur_contract_sync_committee_i = [0u8; 32];
+    cur_contract_sync_committee_i[0] = 10;
+    let mut cur_contract_sync_committee_ii = [0u8; 32];
+    cur_contract_sync_committee_ii[20] = 70;
     let participation = 350;
 
-    let mut new_sync_committee_i = [0u8; 32];
-    new_sync_committee_i[0] = 10;
-    let mut new_sync_committee_ii = [0u8; 32];
-    new_sync_committee_ii[20] = 70;
+    let mut new_contract_sync_committee_i = [0u8; 32];
+    new_contract_sync_committee_i[0] = 10;
+    let mut new_contract_sync_committee_ii = [0u8; 32];
+    new_contract_sync_committee_ii[20] = 70;
 
-    let curr_contract_state = [
+    let cur_contract_state = [
         184, 125, 255, 223, 248, 134, 92, 238, 197, 185, 188, 16, 90, 177, 15, 38, 36, 56, 168,
         111, 27, 58, 138, 200, 137, 14, 185, 195, 135, 70, 115, 55,
     ];
@@ -123,7 +122,7 @@ fn main() {
     // register public inputs
     // TODO: participation?
     target
-        .curr_contract_state
+        .cur_contract_state
         .iter()
         .for_each(|elm| builder.register_public_input(elm.0));
     target
@@ -149,14 +148,14 @@ fn main() {
         &finalized_parent_root,
         &finalized_state_root,
         &finalized_body_root,
-        &curr_contract_state,
+        &cur_contract_state,
         &new_contract_state,
-        &curr_contract_header,
-        curr_contract_slot,
-        &curr_sync_committee_i,
-        &curr_sync_committee_ii,
-        &new_sync_committee_i,
-        &new_sync_committee_ii,
+        &cur_contract_header,
+        cur_contract_slot,
+        &cur_contract_sync_committee_i,
+        &cur_contract_sync_committee_ii,
+        &new_contract_sync_committee_i,
+        &new_contract_sync_committee_ii,
         participation,
         &target,
     );
