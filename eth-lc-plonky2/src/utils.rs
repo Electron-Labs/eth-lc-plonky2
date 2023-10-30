@@ -20,7 +20,7 @@ pub struct BigUintHash256ConnectTarget {
     pub h256: Hash256Target,
 }
 
-pub fn add_is_equal_big_uint_target<F: RichField + Extendable<D>, const D: usize>(
+pub fn add_virtual_is_equal_big_uint_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> IsEqualBigUint {
     let big1 = builder.add_virtual_biguint_target(8);
@@ -36,6 +36,7 @@ pub fn add_is_equal_big_uint_target<F: RichField + Extendable<D>, const D: usize
     IsEqualBigUint { big1, big2, result }
 }
 
+// connects a `BigUintTarget` and its corresponsing `Hash256Target`
 pub fn add_virtual_biguint_hash256_connect_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> BigUintHash256ConnectTarget {

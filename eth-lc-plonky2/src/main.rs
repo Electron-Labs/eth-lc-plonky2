@@ -9,7 +9,6 @@ use plonky2::{
     },
 };
 
-// TODO: readd state validity circuit
 fn main() {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -147,7 +146,7 @@ fn main() {
 
     let target = add_virtual_proof_target(&mut builder);
 
-    // TODO: participation: hwo is it verified?
+    // TODO: participation: how is it verified?
     // register public inputs
     target
         .cur_contract_state
