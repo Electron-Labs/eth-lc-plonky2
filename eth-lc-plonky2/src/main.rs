@@ -9,6 +9,7 @@ use plonky2::{
     },
 };
 
+// TODO: use sync committee proof from lc update
 fn main() {
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
