@@ -90,30 +90,30 @@ fn main() {
         196, 60, 171, 172, 154, 28, 11, 196, 32, 10, 148, 81,
     ];
 
-    let cur_contract_header = [
+    let cur_header = [
         115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21, 58,
         28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
     ];
-    let cur_contract_slot = 6588416;
+    let cur_slot = 6588416;
 
-    let cur_contract_sync_committee_i = [
+    let cur_sync_committee_i = [
         188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128, 239,
         35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
     ];
-    let cur_contract_sync_committee_ii = [
+    let cur_sync_committee_ii = [
         91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98, 134,
         54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
     ];
-    let new_contract_sync_committee_i = [
+    let new_sync_committee_i = [
         91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98, 134,
         54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
     ];
-    let new_contract_sync_committee_ii = [
+    let new_sync_committee_ii = [
         83, 234, 237, 227, 27, 56, 198, 90, 51, 53, 231, 79, 205, 86, 243, 22, 78, 64, 231, 34,
         181, 64, 117, 148, 168, 70, 125, 103, 132, 248, 196, 20,
     ];
     let participation = 433;
-    let new_contract_sync_committee_ii_branch = [
+    let new_sync_committee_ii_branch = [
         [
             91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
             134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
@@ -136,11 +136,11 @@ fn main() {
         ],
     ];
 
-    let cur_contract_state = [
+    let cur_state = [
         184, 125, 255, 223, 248, 134, 92, 238, 197, 185, 188, 16, 90, 177, 15, 38, 36, 56, 168,
         111, 27, 58, 138, 200, 137, 14, 185, 195, 135, 70, 115, 55,
     ];
-    let new_contract_state = [
+    let new_state = [
         248, 94, 17, 117, 76, 129, 51, 3, 205, 253, 251, 77, 214, 130, 186, 45, 159, 36, 3, 207,
         18, 28, 69, 31, 108, 98, 31, 64, 45, 121, 43, 142,
     ];
@@ -150,17 +150,17 @@ fn main() {
     // TODO: participation: how is it verified?
     // register public inputs
     target
-        .cur_contract_state
+        .cur_state
         .iter()
         .for_each(|elm| builder.register_public_input(elm.0));
     target
-        .new_contract_state
+        .new_state
         .iter()
         .for_each(|elm| builder.register_public_input(elm.0));
 
-    let mut pw = PartialWitness::new();
+    let mut witness = PartialWitness::new();
     set_proof_target(
-        &mut pw,
+        &mut witness,
         &signing_root,
         &attested_header_root,
         &domain,
@@ -176,22 +176,22 @@ fn main() {
         &finalized_parent_root,
         &finalized_state_root,
         &finalized_body_root,
-        &cur_contract_state,
-        &new_contract_state,
-        &cur_contract_header,
-        cur_contract_slot,
-        &cur_contract_sync_committee_i,
-        &cur_contract_sync_committee_ii,
-        &new_contract_sync_committee_i,
-        &new_contract_sync_committee_ii,
+        &cur_state,
+        &new_state,
+        &cur_header,
+        cur_slot,
+        &cur_sync_committee_i,
+        &cur_sync_committee_ii,
+        &new_sync_committee_i,
+        &new_sync_committee_ii,
         participation,
-        &new_contract_sync_committee_ii_branch,
+        &new_sync_committee_ii_branch,
         &target,
     );
 
     let data = builder.build::<C>();
     let start_time = std::time::Instant::now();
-    let proof = data.prove(pw).unwrap();
+    let proof = data.prove(witness).unwrap();
     let duration_ms = start_time.elapsed().as_millis();
     println!("proved in {}ms", duration_ms);
     assert!(data.verify(proof).is_ok());

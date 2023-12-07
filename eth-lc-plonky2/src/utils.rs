@@ -4,9 +4,7 @@ use plonky2::{
 };
 use plonky2_crypto::{
     biguint::{BigUintTarget, CircuitBuilderBiguint},
-    hash::{
-        CircuitBuilderHash, Hash256Target,
-    },
+    hash::{CircuitBuilderHash, Hash256Target},
 };
 
 pub struct IsEqualBigUint {
@@ -57,4 +55,86 @@ pub fn add_virtual_biguint_hash256_connect_target<F: RichField + Extendable<D>, 
     }
 
     BigUintHash256ConnectTarget { big, h256 }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::utils::{
+        add_virtual_biguint_hash256_connect_target, add_virtual_is_equal_big_uint_target,
+    };
+    use num::{BigUint, FromPrimitive};
+    use plonky2::{
+        iop::witness::PartialWitness,
+        plonk::{
+            circuit_builder::CircuitBuilder,
+            circuit_data::CircuitConfig,
+            config::{GenericConfig, PoseidonGoldilocksConfig},
+        },
+    };
+    use plonky2_crypto::{hash::WitnessHash, nonnative::gadgets::biguint::WitnessBigUint};
+
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
+    type F = <C as GenericConfig<D>>::F;
+
+    #[test]
+    fn test_is_equal_big_uint_target() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let num1 = 6594800;
+        let num2 = 6594800;
+        let num3 = 6594800 + 1;
+
+        let is_equal_big_uint_target1 = add_virtual_is_equal_big_uint_target(&mut builder);
+        let is_equal_big_uint_target2 = add_virtual_is_equal_big_uint_target(&mut builder);
+        let mut witness = PartialWitness::new();
+
+        let big1_value = BigUint::from_u64(num1).unwrap();
+        let big2_value = BigUint::from_u64(num2).unwrap();
+        let big3_value = BigUint::from_u64(num3).unwrap();
+        witness.set_biguint_target(&is_equal_big_uint_target1.big1, &big1_value);
+        witness.set_biguint_target(&is_equal_big_uint_target1.big2, &big2_value);
+
+        witness.set_biguint_target(&is_equal_big_uint_target2.big1, &big2_value);
+        witness.set_biguint_target(&is_equal_big_uint_target2.big2, &big3_value);
+
+        let one_bool = builder.constant_bool(true);
+        let zero_bool = builder.constant_bool(false);
+        builder.connect(is_equal_big_uint_target1.result.target, one_bool.target);
+        builder.connect(is_equal_big_uint_target2.result.target, zero_bool.target);
+
+        let data = builder.build::<C>();
+        let start_time = std::time::Instant::now();
+        let proof = data.prove(witness).unwrap();
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_biguint_hash256_connect_target() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+
+        let slot: u64 = 25000;
+
+        let biguint_hash256_connect_target =
+            add_virtual_biguint_hash256_connect_target(&mut builder);
+        let mut witness = PartialWitness::new();
+
+        let mut slot_bytes = [0u8; 32];
+        slot_bytes[0..8].copy_from_slice(&slot.to_le_bytes());
+        witness.set_hash256_target(&biguint_hash256_connect_target.h256, &slot_bytes);
+
+        let big_slot = BigUint::from_u64(slot).unwrap();
+        witness.set_biguint_target(&biguint_hash256_connect_target.big, &big_slot);
+
+        let data = builder.build::<C>();
+        let start_time = std::time::Instant::now();
+        let proof = data.prove(witness).unwrap();
+        let duration_ms = start_time.elapsed().as_millis();
+        println!("proved in {}ms", duration_ms);
+        assert!(data.verify(proof).is_ok());
+    }
 }
