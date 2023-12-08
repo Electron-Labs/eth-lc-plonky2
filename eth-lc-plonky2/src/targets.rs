@@ -237,14 +237,13 @@ pub fn add_virtual_verify_sync_committe_target<F: RichField + Extendable<D>, con
         .map(|_| builder.add_virtual_hash256_target())
         .collect::<Vec<Hash256Target>>();
 
-    // TODO: remove conidtional - always verify
-    let sync_committee_branch_target = add_verify_merkle_proof_conditional_target(
+    let sync_committee_branch_target = add_verify_merkle_proof_target(
         builder,
         SYNC_COMMITTEE_INDEX,
         SYNC_COMMITTEE_HEIGHT,
     );
 
-    // conditional merkle leaf verification for new_sync_committee_ii
+    // merkle leaf verification for new_sync_committee_ii
     builder.connect_hash256(sync_committee_branch_target.leaf, new_sync_committee_ii);
     (0..SYNC_COMMITTEE_HEIGHT).into_iter().for_each(|i| {
         builder.connect_hash256(
@@ -253,10 +252,6 @@ pub fn add_virtual_verify_sync_committe_target<F: RichField + Extendable<D>, con
         )
     });
     builder.connect_hash256(sync_committee_branch_target.root, finalized_state_root);
-    builder.connect(
-        sync_committee_branch_target.v.target,
-        is_attested_from_next_period.target,
-    );
 
     // `cur_sync_committee_i` and `new_sync_committee_i` should not differ if attested slot is not from the next period
     let is_attested_not_from_next_period = builder.not(is_attested_from_next_period);

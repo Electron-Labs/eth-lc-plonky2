@@ -5,10 +5,10 @@ mod tests {
     };
     use crate::targets::{
         add_virtual_beacon_block_header_target, add_virtual_contract_state_target,
-        add_virtual_signing_root_target, add_virtual_find_sync_committee_target,
-        add_virtual_verify_sync_committe_target, add_virtual_update_validity_target,
-        set_beacon_block_header_target, set_find_sync_committee_target,
-        FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX, SYNC_COMMITTEE_HEIGHT,
+        add_virtual_find_sync_committee_target, add_virtual_signing_root_target,
+        add_virtual_update_validity_target, add_virtual_verify_sync_committe_target,
+        set_beacon_block_header_target, set_find_sync_committee_target, FINALIZED_HEADER_HEIGHT,
+        FINALIZED_HEADER_INDEX, SYNC_COMMITTEE_HEIGHT,
     };
     use num::{BigUint, FromPrimitive};
     use plonky2::iop::witness::WitnessWrite;
@@ -173,51 +173,50 @@ mod tests {
 
         let contract_state_target = add_virtual_contract_state_target(&mut builder);
 
+        let cur_slot: u64 = 6588416;
         let cur_header = [
             115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21,
             58, 28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
         ];
+        let cur_sync_committee_i = [
+            188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128,
+            239, 35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
+        ];
+        let cur_sync_committee_ii = [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ];
+
+        let new_slot: u64 = 6594720;
         let new_header = [
             181, 47, 90, 74, 144, 147, 36, 105, 62, 96, 18, 13, 201, 106, 185, 87, 99, 0, 172, 243,
             251, 239, 179, 67, 235, 186, 53, 70, 1, 99, 36, 59,
         ];
-        let cur_slot: u64 = 6588416;
-        let new_slot: u64 = 6594720;
 
-        let mut cur_sync_committee_i = [0u8; 32];
-        cur_sync_committee_i[0] = 10;
-        let mut cur_sync_committee_ii = [0u8; 32];
-        cur_sync_committee_ii[20] = 70;
-
-        let mut new_sync_committee_i = [0u8; 32];
-        new_sync_committee_i[0] = 10;
-        let mut new_sync_committee_ii = [0u8; 32];
-        new_sync_committee_ii[20] = 70;
+        let new_sync_committee_i = [
+            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
+            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
+        ];
+        let new_sync_committee_ii = [
+            83, 234, 237, 227, 27, 56, 198, 90, 51, 53, 231, 79, 205, 86, 243, 22, 78, 64, 231, 34,
+            181, 64, 117, 148, 168, 70, 125, 103, 132, 248, 196, 20,
+        ];
 
         let cur_state = [
-            184, 125, 255, 223, 248, 134, 92, 238, 197, 185, 188, 16, 90, 177, 15, 38, 36, 56, 168,
-            111, 27, 58, 138, 200, 137, 14, 185, 195, 135, 70, 115, 55,
+            150, 97, 120, 105, 126, 50, 222, 233, 169, 14, 3, 45, 102, 32, 221, 69, 151, 120, 157,
+            18, 19, 66, 229, 81, 65, 253, 180, 52, 214, 21, 206, 131,
         ];
         let new_state = [
-            248, 94, 17, 117, 76, 129, 51, 3, 205, 253, 251, 77, 214, 130, 186, 45, 159, 36, 3,
-            207, 18, 28, 69, 31, 108, 98, 31, 64, 45, 121, 43, 142,
+            138, 202, 109, 111, 105, 232, 211, 47, 153, 145, 225, 113, 61, 169, 147, 26, 82, 43,
+            39, 187, 51, 189, 135, 92, 146, 108, 100, 39, 249, 104, 231, 198,
         ];
 
         let mut witness = PartialWitness::new();
-        witness.set_hash256_target(
-            &contract_state_target.cur_state,
-            &cur_state,
-        );
-        witness.set_hash256_target(
-            &contract_state_target.cur_header,
-            &cur_header,
-        );
+        witness.set_hash256_target(&contract_state_target.cur_state, &cur_state);
+        witness.set_hash256_target(&contract_state_target.cur_header, &cur_header);
         let mut cur_slot_bytes = [0u8; 32];
         cur_slot_bytes[0..8].copy_from_slice(&cur_slot.to_le_bytes());
-        witness.set_hash256_target(
-            &contract_state_target.cur_slot,
-            &cur_slot_bytes,
-        );
+        witness.set_hash256_target(&contract_state_target.cur_slot, &cur_slot_bytes);
         witness.set_hash256_target(
             &contract_state_target.cur_sync_committee_i,
             &cur_sync_committee_i,
@@ -227,21 +226,12 @@ mod tests {
             &cur_sync_committee_ii,
         );
 
-        witness.set_hash256_target(
-            &contract_state_target.new_state,
-            &new_state,
-        );
-        witness.set_hash256_target(
-            &contract_state_target.new_header,
-            &new_header,
-        );
+        witness.set_hash256_target(&contract_state_target.new_state, &new_state);
+        witness.set_hash256_target(&contract_state_target.new_header, &new_header);
 
         let mut new_slot_bytes = [0u8; 32];
         new_slot_bytes[0..8].copy_from_slice(&new_slot.to_le_bytes());
-        witness.set_hash256_target(
-            &contract_state_target.new_slot,
-            &new_slot_bytes,
-        );
+        witness.set_hash256_target(&contract_state_target.new_slot, &new_slot_bytes);
         witness.set_hash256_target(
             &contract_state_target.new_sync_committee_i,
             &new_sync_committee_i,
@@ -497,10 +487,32 @@ mod tests {
             134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
         ];
 
-        // can be any value like 0
-        let finalized_state_root = [0; 32];
-        // can be any value like 0
-        let new_sync_committee_ii_branch = [[0; 32]; SYNC_COMMITTEE_HEIGHT];
+        let finalized_state_root = [
+            143, 26, 135, 213, 152, 80, 148, 155, 254, 40, 98, 217, 181, 106, 140, 158, 97, 202,
+            251, 182, 66, 88, 195, 40, 185, 115, 91, 206, 161, 169, 92, 68,
+        ];
+        let new_sync_committee_ii_branch = [
+            [
+                188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40,
+                128, 239, 35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
+            ],
+            [
+                234, 231, 114, 54, 44, 243, 88, 150, 182, 242, 223, 157, 60, 29, 83, 156, 6, 39,
+                101, 236, 42, 170, 102, 252, 57, 215, 255, 225, 79, 126, 26, 250,
+            ],
+            [
+                145, 8, 55, 135, 154, 174, 40, 222, 108, 248, 187, 75, 236, 135, 131, 47, 234, 36,
+                52, 180, 39, 168, 57, 216, 187, 36, 194, 17, 249, 249, 110, 227,
+            ],
+            [
+                203, 62, 19, 218, 129, 48, 129, 182, 110, 184, 117, 219, 156, 120, 232, 225, 10,
+                215, 55, 0, 132, 71, 29, 211, 67, 4, 5, 40, 149, 73, 80, 143,
+            ],
+            [
+                7, 45, 207, 169, 60, 175, 233, 143, 99, 90, 153, 235, 109, 72, 14, 157, 242, 102,
+                15, 129, 249, 250, 250, 77, 195, 143, 176, 208, 72, 180, 236, 202,
+            ],
+        ];
 
         let verify_sync_committe_target = add_virtual_verify_sync_committe_target(&mut builder);
         witness.set_bool_target(
