@@ -5,9 +5,9 @@ mod tests {
     };
     use crate::targets::{
         add_virtual_beacon_block_header_target, add_virtual_contract_state_target,
-        add_virtual_signing_root_target, add_virtual_sync_committee_target,
-        add_virtual_update_sync_committe_target, add_virtual_update_validity_target,
-        set_beacon_block_header_target, set_sync_committee_target,
+        add_virtual_signing_root_target, add_virtual_find_sync_committee_target,
+        add_virtual_verify_sync_committe_target, add_virtual_update_validity_target,
+        set_beacon_block_header_target, set_find_sync_committee_target,
         FINALIZED_HEADER_HEIGHT, FINALIZED_HEADER_INDEX, SYNC_COMMITTEE_HEIGHT,
     };
     use num::{BigUint, FromPrimitive};
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_committee_target() {
+    fn test_find_sync_committee_target() {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -268,27 +268,27 @@ mod tests {
         let mut cur_sync_committee_ii = [0u8; 32];
         cur_sync_committee_ii[20] = 70;
 
-        let sync_committee_target1 = add_virtual_sync_committee_target(&mut builder);
-        let sync_committee_target2 = add_virtual_sync_committee_target(&mut builder);
+        let find_cur_sync_committee = add_virtual_find_sync_committee_target(&mut builder);
+        let find_sync_committee_target2 = add_virtual_find_sync_committee_target(&mut builder);
         let mut witness = PartialWitness::new();
 
-        set_sync_committee_target(
+        set_find_sync_committee_target(
             &mut witness,
             attested_slot1,
             cur_slot,
             &cur_sync_committee_i,
             &cur_sync_committee_ii,
             &cur_sync_committee_i,
-            sync_committee_target1,
+            find_cur_sync_committee,
         );
-        set_sync_committee_target(
+        set_find_sync_committee_target(
             &mut witness,
             attested_slot2,
             cur_slot,
             &cur_sync_committee_i,
             &cur_sync_committee_ii,
             &cur_sync_committee_ii,
-            sync_committee_target2,
+            find_sync_committee_target2,
         );
 
         let data = builder.build::<C>();
@@ -296,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_sync_committe_target_when_attested_from_next_period1() {
+    fn test_verify_sync_committe_target_when_attested_from_next_period1() {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -346,32 +346,32 @@ mod tests {
             ],
         ];
 
-        let update_sync_committe_target = add_virtual_update_sync_committe_target(&mut builder);
+        let verify_sync_committe_target = add_virtual_verify_sync_committe_target(&mut builder);
         witness.set_bool_target(
-            update_sync_committe_target.is_attested_from_next_period,
+            verify_sync_committe_target.is_attested_from_next_period,
             is_attested_from_next_period,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_i,
+            &verify_sync_committe_target.cur_sync_committee_i,
             &cur_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_ii,
+            &verify_sync_committe_target.cur_sync_committee_ii,
             &cur_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_i,
+            &verify_sync_committe_target.new_sync_committee_i,
             &new_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_ii,
+            &verify_sync_committe_target.new_sync_committee_ii,
             &new_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.finalized_state_root,
+            &verify_sync_committe_target.finalized_state_root,
             &finalized_state_root,
         );
-        for (i, elm) in update_sync_committe_target
+        for (i, elm) in verify_sync_committe_target
             .new_sync_committee_ii_branch
             .iter()
             .enumerate()
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_update_sync_committe_target_when_attested_from_next_period2() {
+    fn test_verify_sync_committe_target_when_attested_from_next_period2() {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -435,32 +435,32 @@ mod tests {
             ],
         ];
 
-        let update_sync_committe_target = add_virtual_update_sync_committe_target(&mut builder);
+        let verify_sync_committe_target = add_virtual_verify_sync_committe_target(&mut builder);
         witness.set_bool_target(
-            update_sync_committe_target.is_attested_from_next_period,
+            verify_sync_committe_target.is_attested_from_next_period,
             is_attested_from_next_period,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_i,
+            &verify_sync_committe_target.cur_sync_committee_i,
             &cur_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_ii,
+            &verify_sync_committe_target.cur_sync_committee_ii,
             &cur_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_i,
+            &verify_sync_committe_target.new_sync_committee_i,
             &new_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_ii,
+            &verify_sync_committe_target.new_sync_committee_ii,
             &new_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.finalized_state_root,
+            &verify_sync_committe_target.finalized_state_root,
             &finalized_state_root,
         );
-        for (i, elm) in update_sync_committe_target
+        for (i, elm) in verify_sync_committe_target
             .new_sync_committee_ii_branch
             .iter()
             .enumerate()
@@ -473,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_sync_committe_target_when_not_attested_from_next_period1() {
+    fn test_verify_sync_committe_target_when_not_attested_from_next_period1() {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -502,32 +502,32 @@ mod tests {
         // can be any value like 0
         let new_sync_committee_ii_branch = [[0; 32]; SYNC_COMMITTEE_HEIGHT];
 
-        let update_sync_committe_target = add_virtual_update_sync_committe_target(&mut builder);
+        let verify_sync_committe_target = add_virtual_verify_sync_committe_target(&mut builder);
         witness.set_bool_target(
-            update_sync_committe_target.is_attested_from_next_period,
+            verify_sync_committe_target.is_attested_from_next_period,
             is_attested_from_next_period,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_i,
+            &verify_sync_committe_target.cur_sync_committee_i,
             &cur_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_ii,
+            &verify_sync_committe_target.cur_sync_committee_ii,
             &cur_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_i,
+            &verify_sync_committe_target.new_sync_committee_i,
             &new_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_ii,
+            &verify_sync_committe_target.new_sync_committee_ii,
             &new_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.finalized_state_root,
+            &verify_sync_committe_target.finalized_state_root,
             &finalized_state_root,
         );
-        for (i, elm) in update_sync_committe_target
+        for (i, elm) in verify_sync_committe_target
             .new_sync_committee_ii_branch
             .iter()
             .enumerate()
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_update_sync_committe_target_when_not_attested_from_next_period2() {
+    fn test_verify_sync_committe_target_when_not_attested_from_next_period2() {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
@@ -570,32 +570,32 @@ mod tests {
         // can be any value like 0
         let new_sync_committee_ii_branch = [[0; 32]; SYNC_COMMITTEE_HEIGHT];
 
-        let update_sync_committe_target = add_virtual_update_sync_committe_target(&mut builder);
+        let verify_sync_committe_target = add_virtual_verify_sync_committe_target(&mut builder);
         witness.set_bool_target(
-            update_sync_committe_target.is_attested_from_next_period,
+            verify_sync_committe_target.is_attested_from_next_period,
             is_attested_from_next_period,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_i,
+            &verify_sync_committe_target.cur_sync_committee_i,
             &cur_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.cur_sync_committee_ii,
+            &verify_sync_committe_target.cur_sync_committee_ii,
             &cur_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_i,
+            &verify_sync_committe_target.new_sync_committee_i,
             &new_sync_committee_i,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.new_sync_committee_ii,
+            &verify_sync_committe_target.new_sync_committee_ii,
             &new_sync_committee_ii,
         );
         witness.set_hash256_target(
-            &update_sync_committe_target.finalized_state_root,
+            &verify_sync_committe_target.finalized_state_root,
             &finalized_state_root,
         );
-        for (i, elm) in update_sync_committe_target
+        for (i, elm) in verify_sync_committe_target
             .new_sync_committee_ii_branch
             .iter()
             .enumerate()
