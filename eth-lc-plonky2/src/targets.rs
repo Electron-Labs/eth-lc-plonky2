@@ -1,3 +1,4 @@
+// TODO: reorder arguments in all `builder.connect...`
 use crate::merkle_tree_gadget::{
     add_verify_merkle_proof_conditional_target, add_verify_merkle_proof_target,
     add_virtual_merkle_tree_sha256_target,
@@ -36,13 +37,14 @@ pub struct BeaconBlockHeaderTarget {
     pub body_root: Hash256Target,
 }
 
+// TODO: reorder varaiables
 pub struct ContractStateTarget {
     pub cur_state: Hash256Target,
     pub new_state: Hash256Target,
     pub cur_header: Hash256Target,
     pub cur_slot: Hash256Target,
-    pub cur_sync_committee_i: Hash256Target, // sync committee ssz corresponding to the period of `cur_slot `
-    pub cur_sync_committee_ii: Hash256Target, // sync committee ssz corresponding to the period next of `cur_slot`
+    pub cur_sync_committee_i: Hash256Target, // sync committee ssz corresponding to the period of `cur_slot`
+    pub cur_sync_committee_ii: Hash256Target, // Sync committee ssz corresponding to the period next of `cur_slot`
     pub new_header: Hash256Target,
     pub new_slot: Hash256Target,
     pub new_sync_committee_i: Hash256Target, // sync committee ssz corresponding the to period of `new_slot`
@@ -165,75 +167,6 @@ pub fn add_virtual_beacon_block_header_target<F: RichField + Extendable<D>, cons
         parent_root,
         state_root,
         body_root,
-    }
-}
-
-pub fn add_virtual_contract_state_target<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-) -> ContractStateTarget {
-    let cur_state = builder.add_virtual_hash256_target();
-    let new_state = builder.add_virtual_hash256_target();
-    let cur_header = builder.add_virtual_hash256_target();
-    let cur_slot = builder.add_virtual_hash256_target();
-    let cur_sync_committee_i = builder.add_virtual_hash256_target();
-    let cur_sync_committee_ii = builder.add_virtual_hash256_target();
-    let new_header = builder.add_virtual_hash256_target();
-    let new_slot = builder.add_virtual_hash256_target();
-    let new_sync_committee_i = builder.add_virtual_hash256_target();
-    let new_sync_committee_ii = builder.add_virtual_hash256_target();
-
-    let cur_merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 2);
-    builder.connect_hash256(cur_header, cur_merkle_tree_target.leaves[0]);
-    builder.connect_hash256(cur_slot, cur_merkle_tree_target.leaves[1]);
-    builder.connect_hash256(
-        cur_sync_committee_i,
-        cur_merkle_tree_target.leaves[2],
-    );
-    builder.connect_hash256(
-        cur_sync_committee_ii,
-        cur_merkle_tree_target.leaves[3],
-    );
-
-    let zero_u32 = builder.zero_u32();
-    for &target in cur_merkle_tree_target.leaves[4..].iter() {
-        for &limb in target.iter() {
-            builder.connect_u32(limb, zero_u32);
-        }
-    }
-
-    let new_merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 2);
-    builder.connect_hash256(new_header, new_merkle_tree_target.leaves[0]);
-    builder.connect_hash256(new_slot, new_merkle_tree_target.leaves[1]);
-    builder.connect_hash256(
-        new_sync_committee_i,
-        new_merkle_tree_target.leaves[2],
-    );
-    builder.connect_hash256(
-        new_sync_committee_ii,
-        new_merkle_tree_target.leaves[3],
-    );
-
-    let zero_u32 = builder.zero_u32();
-    for &target in new_merkle_tree_target.leaves[4..].iter() {
-        for &limb in target.iter() {
-            builder.connect_u32(limb, zero_u32);
-        }
-    }
-
-    builder.connect_hash256(cur_state, cur_merkle_tree_target.root);
-    builder.connect_hash256(new_state, new_merkle_tree_target.root);
-
-    ContractStateTarget {
-        cur_state,
-        new_state,
-        cur_header,
-        cur_slot,
-        cur_sync_committee_i,
-        cur_sync_committee_ii,
-        new_header,
-        new_slot,
-        new_sync_committee_i,
-        new_sync_committee_ii,
     }
 }
 
@@ -393,43 +326,113 @@ pub fn add_virtual_update_validity_target<F: RichField + Extendable<D>, const D:
     }
 }
 
+pub fn add_virtual_contract_state_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> ContractStateTarget {
+    let cur_state = builder.add_virtual_hash256_target();
+    let new_state = builder.add_virtual_hash256_target();
+    let cur_slot = builder.add_virtual_hash256_target();
+    let cur_header = builder.add_virtual_hash256_target();
+    let cur_sync_committee_i = builder.add_virtual_hash256_target();
+    let cur_sync_committee_ii = builder.add_virtual_hash256_target();
+    let new_slot = builder.add_virtual_hash256_target();
+    let new_header = builder.add_virtual_hash256_target();
+    let new_sync_committee_i = builder.add_virtual_hash256_target();
+    let new_sync_committee_ii = builder.add_virtual_hash256_target();
+
+    let cur_merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 2);
+    builder.connect_hash256(cur_slot, cur_merkle_tree_target.leaves[0]);
+    builder.connect_hash256(cur_header, cur_merkle_tree_target.leaves[1]);
+    builder.connect_hash256(
+        cur_sync_committee_i,
+        cur_merkle_tree_target.leaves[2],
+    );
+    builder.connect_hash256(
+        cur_sync_committee_ii,
+        cur_merkle_tree_target.leaves[3],
+    );
+
+    let zero_u32 = builder.zero_u32();
+    for &target in cur_merkle_tree_target.leaves[4..].iter() {
+        for &limb in target.iter() {
+            builder.connect_u32(limb, zero_u32);
+        }
+    }
+
+    let new_merkle_tree_target = add_virtual_merkle_tree_sha256_target(builder, 2);
+    builder.connect_hash256(new_slot, new_merkle_tree_target.leaves[0]);
+    builder.connect_hash256(new_header, new_merkle_tree_target.leaves[1]);
+    builder.connect_hash256(
+        new_sync_committee_i,
+        new_merkle_tree_target.leaves[2],
+    );
+    builder.connect_hash256(
+        new_sync_committee_ii,
+        new_merkle_tree_target.leaves[3],
+    );
+
+    let zero_u32 = builder.zero_u32();
+    for &target in new_merkle_tree_target.leaves[4..].iter() {
+        for &limb in target.iter() {
+            builder.connect_u32(limb, zero_u32);
+        }
+    }
+
+    builder.connect_hash256(cur_state, cur_merkle_tree_target.root);
+    builder.connect_hash256(new_state, new_merkle_tree_target.root);
+
+    ContractStateTarget {
+        cur_state,
+        new_state,
+        cur_header,
+        cur_slot,
+        cur_sync_committee_i,
+        cur_sync_committee_ii,
+        new_header,
+        new_slot,
+        new_sync_committee_i,
+        new_sync_committee_ii,
+    }
+}
+
 pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> ProofTarget {
     let signing_root = builder.add_virtual_hash256_target();
-    let attested_header_root = builder.add_virtual_hash256_target();
     let domain = builder.add_virtual_hash256_target();
+
+    let attested_header_root = builder.add_virtual_hash256_target();
     let attested_slot = builder.add_virtual_hash256_target();
+    let attested_slot_big = builder.add_virtual_biguint_target(8);
     let attested_proposer_index = builder.add_virtual_hash256_target();
     let attested_parent_root = builder.add_virtual_hash256_target();
     let attested_state_root = builder.add_virtual_hash256_target();
     let attested_body_root = builder.add_virtual_hash256_target();
     let finalized_header_root = builder.add_virtual_hash256_target();
     let finalized_slot = builder.add_virtual_hash256_target();
+    let finalized_slot_big = builder.add_virtual_biguint_target(8);
     let finalized_proposer_index = builder.add_virtual_hash256_target();
     let finalized_parent_root = builder.add_virtual_hash256_target();
     let finalized_state_root = builder.add_virtual_hash256_target();
     let finalized_body_root = builder.add_virtual_hash256_target();
     let finality_branch = (0..FINALIZED_HEADER_HEIGHT)
-        .map(|_| builder.add_virtual_hash256_target())
-        .collect::<Vec<Hash256Target>>();
+    .map(|_| builder.add_virtual_hash256_target())
+    .collect::<Vec<Hash256Target>>();
+    let participation_big = builder.add_virtual_biguint_target(8);
 
     let cur_state = builder.add_virtual_hash256_target();
-    let cur_header = builder.add_virtual_hash256_target();
     let cur_slot = builder.add_virtual_hash256_target();
+    let cur_slot_big = builder.add_virtual_biguint_target(8);
+    let cur_header = builder.add_virtual_hash256_target();
     let cur_sync_committee_i = builder.add_virtual_hash256_target();
     let cur_sync_committee_ii = builder.add_virtual_hash256_target();
     let new_state = builder.add_virtual_hash256_target();
     let new_sync_committee_i = builder.add_virtual_hash256_target();
     let new_sync_committee_ii = builder.add_virtual_hash256_target();
     let participation = builder.add_virtual_hash256_target();
-    let cur_slot_big = builder.add_virtual_biguint_target(8);
-    let attested_slot_big = builder.add_virtual_biguint_target(8);
     let new_sync_committee_ii_branch = (0..SYNC_COMMITTEE_HEIGHT)
         .map(|_| builder.add_virtual_hash256_target())
         .collect::<Vec<Hash256Target>>();
-    let finalized_slot_big = builder.add_virtual_biguint_target(8);
-    let participation_big = builder.add_virtual_biguint_target(8);
 
     // 2. [altair] process_light_client_update: Verify Merkle branch of header
     let signing_root_target = add_virtual_signing_root_target(builder);
@@ -450,6 +453,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder.connect_hash256(signing_root, signing_root_target.signing_root);
     builder.connect_hash256(attested_header_root, signing_root_target.header_root);
     builder.connect_hash256(domain, signing_root_target.domain);
+
 
     // *** attested block header ***
     builder.connect_hash256(
@@ -474,6 +478,15 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         attested_beacon_block_header_target.state_root,
     );
 
+
+    // *** finality branch ***
+    builder.connect_hash256(finalized_header_root, finality_branch_target.leaf);
+    builder.connect_hash256(attested_state_root, finality_branch_target.root);
+    (0..FINALIZED_HEADER_HEIGHT)
+        .into_iter()
+        .for_each(|i| builder.connect_hash256(finality_branch[i], finality_branch_target.proof[i]));
+
+
     // *** finalized block header ***
     builder.connect_hash256(
         finalized_body_root,
@@ -497,40 +510,6 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         finalized_beacon_block_header_target.state_root,
     );
 
-    // *** finality branch ***
-    builder.connect_hash256(finalized_header_root, finality_branch_target.leaf);
-    builder.connect_hash256(attested_state_root, finality_branch_target.root);
-    (0..FINALIZED_HEADER_HEIGHT)
-        .into_iter()
-        .for_each(|i| builder.connect_hash256(finality_branch[i], finality_branch_target.proof[i]));
-
-    // *** contract state ***
-    builder.connect_hash256(
-        cur_header,
-        contract_state_target.cur_header,
-    );
-    builder.connect_hash256(cur_slot, contract_state_target.cur_slot);
-    builder.connect_hash256(
-        cur_sync_committee_i,
-        contract_state_target.cur_sync_committee_i,
-    );
-    builder.connect_hash256(
-        cur_sync_committee_ii,
-        contract_state_target.cur_sync_committee_ii,
-    );
-    builder.connect_hash256(
-        finalized_header_root,
-        contract_state_target.new_header,
-    );
-    builder.connect_hash256(finalized_slot, contract_state_target.new_slot);
-    builder.connect_hash256(
-        new_sync_committee_i,
-        contract_state_target.new_sync_committee_i,
-    );
-    builder.connect_hash256(
-        new_sync_committee_ii,
-        contract_state_target.new_sync_committee_ii,
-    );
 
     // *** sync committee ***
     builder.connect_biguint(
@@ -548,15 +527,6 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     );
     // TODO: use sync_committee_target.sync_committee_for_attested_slot for signature verification
 
-    // connect `cur_slot_big` and `cur_slot`
-    let connect_contract_slot = add_virtual_biguint_hash256_connect_target(builder);
-    builder.connect_hash256(connect_contract_slot.h256, cur_slot);
-    builder.connect_biguint(&connect_contract_slot.big, &cur_slot_big);
-
-    // connect `attested_slot_big` and `attested_slot`
-    let connect_attested_slot = add_virtual_biguint_hash256_connect_target(builder);
-    builder.connect_hash256(connect_attested_slot.h256, attested_slot);
-    builder.connect_biguint(&connect_attested_slot.big, &attested_slot_big);
 
     // *** update sync committee ***
     builder.connect(
@@ -592,6 +562,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         )
     });
 
+
     // *** update validity ***
     builder.connect_biguint(
         &update_validity_target.cur_slot_big,
@@ -605,6 +576,55 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         &update_validity_target.participation_big,
         &participation_big,
     );
+
+
+    // *** contract state ***
+    builder.connect_hash256(
+        cur_state,
+        contract_state_target.cur_state,
+    );
+    builder.connect_hash256(
+        new_state,
+        contract_state_target.new_state,
+    );
+    builder.connect_hash256(
+        cur_header,
+        contract_state_target.cur_header,
+    );
+    builder.connect_hash256(cur_slot, contract_state_target.cur_slot);
+    builder.connect_hash256(
+        cur_sync_committee_i,
+        contract_state_target.cur_sync_committee_i,
+    );
+    builder.connect_hash256(
+        cur_sync_committee_ii,
+        contract_state_target.cur_sync_committee_ii,
+    );
+    builder.connect_hash256(
+        finalized_header_root,
+        contract_state_target.new_header,
+    );
+    builder.connect_hash256(finalized_slot, contract_state_target.new_slot);
+    builder.connect_hash256(
+        new_sync_committee_i,
+        contract_state_target.new_sync_committee_i,
+    );
+    builder.connect_hash256(
+        new_sync_committee_ii,
+        contract_state_target.new_sync_committee_ii,
+    );
+
+
+    // *** make neccessary connections ***
+    // connect `cur_slot_big` and `cur_slot`
+    let connect_contract_slot = add_virtual_biguint_hash256_connect_target(builder);
+    builder.connect_hash256(connect_contract_slot.h256, cur_slot);
+    builder.connect_biguint(&connect_contract_slot.big, &cur_slot_big);
+
+    // connect `attested_slot_big` and `attested_slot`
+    let connect_attested_slot = add_virtual_biguint_hash256_connect_target(builder);
+    builder.connect_hash256(connect_attested_slot.h256, attested_slot);
+    builder.connect_biguint(&connect_attested_slot.big, &attested_slot_big);
 
     // connect `finalized_slot_big` and `finalized_slot`
     let connect_finalized_slot = add_virtual_biguint_hash256_connect_target(builder);
@@ -704,6 +724,7 @@ pub fn set_sync_committee_target<F: RichField, W: WitnessHashSha2<F>>(
     );
 }
 
+// TODO: add param docs here
 pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     witness: &mut W,
     signing_root: &[u8; 32],
