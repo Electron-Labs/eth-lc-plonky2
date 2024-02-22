@@ -9,14 +9,5 @@ edition = "2021"
 plonky2 = "0.1.4"
 plonky2_crypto = { git = "https://github.com/Electron-Labs/plonky2-crypto" }
 num = "0.4.1"
-
-[profile.release]
-opt-level = 3
-#lto = "fat"
-#codegen-units = 1
-
-[profile.bench]
-opt-level = 3
-
-[profile.test]
-opt-level = 0
+env_logger = "0.11.2"
+hex = "0.4.3"
