@@ -34,7 +34,7 @@ pub fn ssz_sync_committee<F: RichField + Extendable<D>,
     builder: &mut CircuitBuilder<F, D>,
     sync_committee: &SyncCommitteeTarget,
 ) -> Hash256Target {
-    let pubkey_merkle_tree = add_virtual_merkle_tree_sha256_target(builder, LOG2_SYNC_COMMITTEE_SIZE);
+    let pubkey_merkle_tree = add_virtual_merkle_tree_sha256_target(builder, LOG2_SYNC_COMMITTEE_SIZE+1);
     pubkey_merkle_tree.leaves.chunks(2).enumerate().for_each(|(i, leaf)| {
         leaf[0].iter().enumerate().for_each(|(idx, t)| {
             let u32_target = read_u32_be(builder, &sync_committee.pubkeys[i], idx*4);
@@ -50,7 +50,7 @@ pub fn ssz_sync_committee<F: RichField + Extendable<D>,
             }
         });
     });
-    let aggregate_merkle_tree = add_virtual_merkle_tree_sha256_target(builder, 2);
+    let aggregate_merkle_tree = add_virtual_merkle_tree_sha256_target(builder, 1);
     aggregate_merkle_tree.leaves[0].iter().enumerate().for_each(|(idx, t)| {
         let u32_target = read_u32_be(builder, &sync_committee.aggregate_pubkey, idx*4);
         builder.connect_u32(u32_target, *t);
@@ -64,7 +64,7 @@ pub fn ssz_sync_committee<F: RichField + Extendable<D>,
             builder.connect_u32(zero_u32, *t);
         }
     });
-    let sync_committee_merkle_tree = add_virtual_merkle_tree_sha256_target(builder, 2);
+    let sync_committee_merkle_tree = add_virtual_merkle_tree_sha256_target(builder, 1);
     builder.connect_hash256(pubkey_merkle_tree.root, sync_committee_merkle_tree.leaves[0]);
     builder.connect_hash256(aggregate_merkle_tree.root, sync_committee_merkle_tree.leaves[1]);
     sync_committee_merkle_tree.root
