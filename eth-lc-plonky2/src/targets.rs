@@ -2,6 +2,7 @@ use crate::merkle_tree_gadget::{
     add_verify_merkle_proof_conditional_target, add_verify_merkle_proof_target,
     add_virtual_merkle_tree_sha256_target,
 };
+use crate::sync_committee_pubkeys::{add_virtual_sync_committee_target, ssz_sync_committee, SyncCommitteeTarget, SYNC_COMMITTEE_SIZE};
 use crate::utils::{
     add_virtual_biguint_hash256_connect_target, add_virtual_is_equal_big_uint_target,
 };
@@ -100,12 +101,14 @@ pub struct ProofTarget {
     pub new_state: Hash256Target,
     pub new_sync_committee_i: Hash256Target,
     pub new_sync_committee_ii: Hash256Target,
-    pub participation: Hash256Target,
+    pub sync_committee_bits: Vec<BoolTarget>,
+    // pub participation: Hash256Target,
     pub cur_slot_big: BigUintTarget,
     pub attested_slot_big: BigUintTarget,
     pub new_sync_committee_ii_branch: Vec<Hash256Target>,
     pub finalized_slot_big: BigUintTarget,
-    pub participation_big: BigUintTarget,
+    // pub participation_big: BigUintTarget,
+    pub sync_committee: SyncCommitteeTarget,
 }
 
 pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: usize>(
@@ -296,7 +299,7 @@ pub fn add_virtual_update_validity_target<F: RichField + Extendable<D>, const D:
 ) -> UpdateValidityTarget {
     let cur_slot_big = builder.add_virtual_biguint_target(8);
     let finalized_slot_big = builder.add_virtual_biguint_target(8);
-    let participation_big = builder.add_virtual_biguint_target(8);
+    let participation_big = builder.add_virtual_biguint_target(1);
 
     let one = builder.one();
     let zero = builder.zero();
@@ -401,7 +404,6 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     let finality_branch = (0..FINALIZED_HEADER_HEIGHT)
         .map(|_| builder.add_virtual_hash256_target())
         .collect::<Vec<Hash256Target>>();
-    let participation_big = builder.add_virtual_biguint_target(8);
 
     let cur_state = builder.add_virtual_hash256_target();
     let cur_slot = builder.add_virtual_hash256_target();
@@ -412,10 +414,21 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     let new_state = builder.add_virtual_hash256_target();
     let new_sync_committee_i = builder.add_virtual_hash256_target();
     let new_sync_committee_ii = builder.add_virtual_hash256_target();
-    let participation = builder.add_virtual_hash256_target();
     let new_sync_committee_ii_branch = (0..SYNC_COMMITTEE_HEIGHT)
         .map(|_| builder.add_virtual_hash256_target())
         .collect::<Vec<Hash256Target>>();
+
+    let sync_committee = add_virtual_sync_committee_target(builder);
+    let sync_committee_ssz = ssz_sync_committee(builder, &sync_committee);
+
+    let mut sync_committee_bits = vec![];
+    for _ in 0..SYNC_COMMITTEE_SIZE {
+        sync_committee_bits.push(builder.add_virtual_bool_target_safe());
+    }
+
+    let participation = builder.add_many(sync_committee_bits.iter().map(|b| b.target));
+
+    builder.connect_hash256(cur_sync_committee_i, sync_committee_ssz);
 
     // 2. [altair] process_light_client_update: Verify Merkle branch of header
     let signing_root_target = add_virtual_signing_root_target(builder);
@@ -548,9 +561,9 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         &update_validity_target.finalized_slot_big,
         &finalized_slot_big,
     );
-    builder.connect_biguint(
-        &update_validity_target.participation_big,
-        &participation_big,
+    builder.connect(
+        update_validity_target.participation_big.limbs[0].0,
+        participation,
     );
 
 
@@ -595,10 +608,10 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder.connect_hash256(connect_finalized_slot.h256, finalized_slot);
     builder.connect_biguint(&connect_finalized_slot.big, &finalized_slot_big);
 
-    // connect `participation_big` and `participation`
-    let connect_participation = add_virtual_biguint_hash256_connect_target(builder);
-    builder.connect_hash256(connect_participation.h256, participation);
-    builder.connect_biguint(&connect_participation.big, &participation_big);
+    // // connect `participation_big` and `participation`
+    // let connect_participation = add_virtual_biguint_hash256_connect_target(builder);
+    // builder.connect_hash256(connect_participation.h256, participation);
+    // builder.connect_biguint(&connect_participation.big, &participation_big);
 
     ProofTarget {
         signing_root,
@@ -624,12 +637,14 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         new_state,
         new_sync_committee_i,
         new_sync_committee_ii,
-        participation,
+        sync_committee_bits,
+        // participation,
         cur_slot_big,
         attested_slot_big,
         new_sync_committee_ii_branch,
         finalized_slot_big,
-        participation_big,
+        // participation_big,
+        sync_committee,
     }
 }
 
@@ -746,8 +761,11 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     cur_sync_committee_ii: &[u8; 32],
     new_sync_committee_i: &[u8; 32],
     new_sync_committee_ii: &[u8; 32],
-    participation: u64,
+    // participation: u64,
+    sync_committee_bits: &[bool],
     new_sync_committee_ii_branch: &[[u8; 32]; SYNC_COMMITTEE_HEIGHT],
+    sync_committee_pubkyes: &[Vec<u8>],
+    sync_committee_aggregate: &[u8],
     target: &ProofTarget,
 ) {
     witness.set_hash256_target(&target.attested_header_root, attested_header_root);
@@ -800,9 +818,12 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     witness.set_hash256_target(&target.new_sync_committee_i, &new_sync_committee_i);
     witness.set_hash256_target(&target.new_sync_committee_ii, &new_sync_committee_ii);
 
-    let mut participation_bytes = [0u8; 32];
-    participation_bytes[0..8].copy_from_slice(&participation.to_le_bytes());
-    witness.set_hash256_target(&target.participation, &participation_bytes);
+    for i in 0..SYNC_COMMITTEE_SIZE {
+        witness.set_bool_target(target.sync_committee_bits[i], sync_committee_bits[i]);
+    }
+    // let mut participation_bytes = [0u8; 32];
+    // participation_bytes[0..8].copy_from_slice(&participation.to_le_bytes());
+    // witness.set_hash256_target(&target.participation, &participation_bytes);
 
     let attested_slot_big_value = BigUint::from_u64(attested_slot).unwrap();
     let cur_slot_big_value = BigUint::from_u64(cur_slot).unwrap();
@@ -819,6 +840,13 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     let finalized_slot_big_value = BigUint::from_u64(finalized_slot).unwrap();
     witness.set_biguint_target(&target.finalized_slot_big, &finalized_slot_big_value);
 
-    let participation_big_value = BigUint::from_u64(participation).unwrap();
-    witness.set_biguint_target(&target.participation_big, &participation_big_value);
+    // let participation_big_value = BigUint::from_u64(participation).unwrap();
+    // witness.set_biguint_target(&target.participation_big, &participation_big_value);
+
+    for i in 0..SYNC_COMMITTEE_SIZE {
+        let f_elts = sync_committee_pubkyes[i].iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<_>>();
+        witness.set_target_arr(&target.sync_committee.pubkeys[i], &f_elts);
+    }
+    let f_elts = sync_committee_aggregate.iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<_>>();
+    witness.set_target_arr(&target.sync_committee.aggregate_pubkey, &f_elts);
 }

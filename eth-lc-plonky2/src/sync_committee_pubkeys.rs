@@ -12,6 +12,22 @@ pub struct SyncCommitteeTarget {
     pub aggregate_pubkey: [Target; G1_PUBKEY_SIZE],
 }
 
+pub fn add_virtual_sync_committee_target<F: RichField + Extendable<D>,
+    const D: usize,
+>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> SyncCommitteeTarget {
+    let mut pubkeys = vec![];
+    for _ in 0..SYNC_COMMITTEE_SIZE {
+        pubkeys.push(builder.add_virtual_target_arr::<G1_PUBKEY_SIZE>());
+    }
+    let aggregate_pubkey = builder.add_virtual_target_arr::<G1_PUBKEY_SIZE>();
+    SyncCommitteeTarget {
+        pubkeys,
+        aggregate_pubkey,
+    }
+}
+
 fn read_u32_be<F: RichField + Extendable<D>,
     const D: usize
 >(

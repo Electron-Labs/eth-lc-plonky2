@@ -57,6 +57,19 @@ pub fn add_virtual_biguint_hash256_connect_target<F: RichField + Extendable<D>, 
     BigUintHash256ConnectTarget { big, h256 }
 }
 
+pub fn bits_from_hex(hex: &str) -> Vec<bool> {
+    let only_hex;
+    if hex.split_at(2).0 == "0x" {
+        only_hex = hex.split_at(2).1;
+    } else {
+        only_hex = hex;
+    }
+    let bytes = hex::decode(only_hex).unwrap();
+    bytes.iter().flat_map(|b| {
+        (0..8).into_iter().rev().map(|i| (b>>i)&1 != 0).collect::<Vec<_>>()
+    }).collect::<Vec<_>>()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::utils::{
@@ -72,6 +85,8 @@ mod tests {
         },
     };
     use plonky2_crypto::{hash::WitnessHash, nonnative::gadgets::biguint::WitnessBigUint};
+
+    use super::bits_from_hex;
 
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
@@ -136,5 +151,14 @@ mod tests {
         let duration_ms = start_time.elapsed().as_millis();
         println!("proved in {}ms", duration_ms);
         assert!(data.verify(proof).is_ok());
+    }
+
+    #[test]
+    fn test_bits_from_hex() {
+        let bits = bits_from_hex("0102");
+        let mut res = vec![false; 16];
+        res[7] = true;
+        res[14] = true;
+        assert_eq!(bits, res);
     }
 }
