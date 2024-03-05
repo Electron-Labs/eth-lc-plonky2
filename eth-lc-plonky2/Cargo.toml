@@ -11,3 +11,7 @@ plonky2_crypto = { git = "https://github.com/Electron-Labs/plonky2-crypto" }
 num = "0.4.1"
 env_logger = "0.11.2"
 hex = "0.4.3"
+eth-types = { git = "https://github.com/aurora-is-near/rainbow-bridge" }
+tree_hash = "0.5"
+tree_hash_derive = "0.5"
+plonky2-circuit-serializer = { git = "https://github.com/Electron-Labs/plonky2-circuit-serializer.git" }

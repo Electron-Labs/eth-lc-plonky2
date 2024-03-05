@@ -66,7 +66,7 @@ pub fn bits_from_hex(hex: &str) -> Vec<bool> {
     }
     let bytes = hex::decode(only_hex).unwrap();
     bytes.iter().flat_map(|b| {
-        (0..8).into_iter().rev().map(|i| (b>>i)&1 != 0).collect::<Vec<_>>()
+        (0..8).into_iter().map(|i| (b>>i)&1 != 0).collect::<Vec<_>>()
     }).collect::<Vec<_>>()
 }
 
@@ -157,8 +157,8 @@ mod tests {
     fn test_bits_from_hex() {
         let bits = bits_from_hex("0102");
         let mut res = vec![false; 16];
-        res[7] = true;
-        res[14] = true;
+        res[0] = true;
+        res[9] = true;
         assert_eq!(bits, res);
     }
 }

@@ -2,11 +2,15 @@ use crate::merkle_tree_gadget::{
     add_verify_merkle_proof_conditional_target, add_verify_merkle_proof_target,
     add_virtual_merkle_tree_sha256_target,
 };
-use crate::sync_committee_pubkeys::{add_virtual_sync_committee_target, ssz_sync_committee, SyncCommitteeTarget, SYNC_COMMITTEE_SIZE};
+use crate::sync_committee_pubkeys::{add_virtual_sync_committee_target, read_u32_be, ssz_sync_committee, SyncCommitteeTarget, G1_PUBKEY_SIZE, SYNC_COMMITTEE_SIZE};
 use crate::utils::{
     add_virtual_biguint_hash256_connect_target, add_virtual_is_equal_big_uint_target,
 };
 use num::{BigUint, FromPrimitive};
+use plonky2::iop::target::Target;
+use plonky2::plonk::circuit_data::{CommonCircuitData, VerifierCircuitTarget, VerifierOnlyCircuitData};
+use plonky2::plonk::config::{AlgebraicHasher, GenericConfig};
+use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
 use plonky2::{
     field::extension::Extendable, hash::hash_types::RichField, iop::target::BoolTarget,
     plonk::circuit_builder::CircuitBuilder,
@@ -77,8 +81,8 @@ pub struct ContractStateTarget {
     pub new_sync_committee_ii: Hash256Target,
 }
 
-pub struct ProofTarget {
-    pub signing_root: Hash256Target,
+pub struct ProofTarget<const D: usize> {
+    pub signing_root_bytes: [Target; 32],
     pub attested_header_root: Hash256Target,
     pub domain: Hash256Target,
     pub attested_slot: Hash256Target,
@@ -109,6 +113,9 @@ pub struct ProofTarget {
     pub finalized_slot_big: BigUintTarget,
     // pub participation_big: BigUintTarget,
     pub sync_committee: SyncCommitteeTarget,
+    pub signature_bytes: [Target; 96],
+    pub bls_proof: ProofWithPublicInputsTarget<D>,
+    pub bls_verifier_data: VerifierCircuitTarget,
 }
 
 pub fn add_virtual_signing_root_target<F: RichField + Extendable<D>, const D: usize>(
@@ -381,10 +388,19 @@ pub fn add_virtual_contract_state_target<F: RichField + Extendable<D>, const D: 
     }
 }
 
-pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
+pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize, InnerC: GenericConfig<D, F = F>>(
     builder: &mut CircuitBuilder<F, D>,
-) -> ProofTarget {
+    bls_sig_cd: &CommonCircuitData<F, D>,
+) -> ProofTarget<D>
+where InnerC::Hasher: AlgebraicHasher<F>
+{
+    let signing_root_bytes = builder.add_virtual_target_arr::<32>();
     let signing_root = builder.add_virtual_hash256_target();
+
+    signing_root.iter().enumerate().for_each(|(idx, t)| {
+        let u32_target = read_u32_be(builder, &signing_root_bytes, idx*4);
+        builder.connect_u32(u32_target, *t);
+    });
     let domain = builder.add_virtual_hash256_target();
 
     let attested_header_root = builder.add_virtual_hash256_target();
@@ -425,10 +441,9 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     for _ in 0..SYNC_COMMITTEE_SIZE {
         sync_committee_bits.push(builder.add_virtual_bool_target_safe());
     }
+    let signature_bytes = builder.add_virtual_target_arr::<96>();
 
     let participation = builder.add_many(sync_committee_bits.iter().map(|b| b.target));
-
-    builder.connect_hash256(cur_sync_committee_i, sync_committee_ssz);
 
     // 2. [altair] process_light_client_update: Verify Merkle branch of header
     let signing_root_target = add_virtual_signing_root_target(builder);
@@ -450,6 +465,21 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder.connect_hash256(signing_root_target.header_root, attested_header_root);
     builder.connect_hash256(signing_root_target.domain, domain);
 
+    let bls_proof = builder.add_virtual_proof_with_pis(bls_sig_cd);
+    let bls_verifier_data = builder.add_virtual_verifier_data(bls_sig_cd.config.fri_config.cap_height);
+    builder.verify_proof::<InnerC>(&bls_proof, &bls_verifier_data, bls_sig_cd);
+    signing_root_bytes.iter().enumerate().for_each(|(idx, t)| {
+        builder.connect(bls_proof.public_inputs[idx], *t);
+    });
+    signature_bytes.iter().enumerate().for_each(|(idx, t)| {
+        builder.connect(bls_proof.public_inputs[idx + 32], *t);
+    });
+    for i in 0..SYNC_COMMITTEE_SIZE {
+        for j in 0..G1_PUBKEY_SIZE {
+            builder.connect(bls_proof.public_inputs[32 + 96 + i*(G1_PUBKEY_SIZE + 1) + j], sync_committee.pubkeys[i][j]);
+        }
+        builder.connect(bls_proof.public_inputs[32 + 96 + i*(G1_PUBKEY_SIZE + 1) + G1_PUBKEY_SIZE], sync_committee_bits[i].target);
+    }
 
     // *** attested block header ***
     builder.connect_hash256(
@@ -518,6 +548,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         find_sync_committee_target.cur_sync_committee_ii,
         cur_sync_committee_ii,
     );
+    builder.connect_hash256(find_sync_committee_target.sync_committee_for_attested_slot, sync_committee_ssz);
     // TODO: use find_sync_committee_target.sync_committee_for_attested_slot for signature verification
 
     // *** update sync committee ***
@@ -545,7 +576,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     );
     builder.connect_hash256(
         verify_sync_committe_target.finalized_state_root,
-        finalized_state_root,
+        attested_state_root,
     );
     (0..SYNC_COMMITTEE_HEIGHT).into_iter().for_each(|i| {
         builder.connect_hash256(
@@ -614,7 +645,7 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
     // builder.connect_biguint(&connect_participation.big, &participation_big);
 
     ProofTarget {
-        signing_root,
+        signing_root_bytes,
         attested_header_root,
         domain,
         attested_slot,
@@ -645,6 +676,9 @@ pub fn add_virtual_proof_target<F: RichField + Extendable<D>, const D: usize>(
         finalized_slot_big,
         // participation_big,
         sync_committee,
+        signature_bytes,
+        bls_proof,
+        bls_verifier_data,
     }
 }
 
@@ -734,7 +768,7 @@ pub fn set_find_sync_committee_target<F: RichField, W: WitnessHashSha2<F>>(
  * participation
  * new_sync_committee_ii_branch: merkle proof against Finalized State Root
  */
-pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
+pub fn set_proof_target<F: RichField + Extendable<D>, const D: usize, W: WitnessHashSha2<F>, InnerC: GenericConfig<D, F = F>>(
     witness: &mut W,
     signing_root: &[u8; 32],
     domain: &[u8; 32],
@@ -766,11 +800,17 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     new_sync_committee_ii_branch: &[[u8; 32]; SYNC_COMMITTEE_HEIGHT],
     sync_committee_pubkyes: &[Vec<u8>],
     sync_committee_aggregate: &[u8],
-    target: &ProofTarget,
-) {
+    signature: &[u8],
+    bls_proof: &ProofWithPublicInputs<F, InnerC, D>,
+    bls_verifier_data: &VerifierOnlyCircuitData<InnerC, D>,
+    target: &ProofTarget<D>,
+) where
+    InnerC::Hasher: AlgebraicHasher<F>,
+{
     witness.set_hash256_target(&target.attested_header_root, attested_header_root);
     witness.set_hash256_target(&target.domain, domain);
-    witness.set_hash256_target(&target.signing_root, signing_root);
+    let f_signing_root = signing_root.iter().map(|s| F::from_canonical_u8(*s)).collect::<Vec<_>>();
+    witness.set_target_arr(&target.signing_root_bytes, &f_signing_root);
 
     witness.set_hash256_target(&target.attested_parent_root, attested_parent_root);
     witness.set_hash256_target(&target.attested_state_root, attested_state_root);
@@ -849,4 +889,10 @@ pub fn set_proof_target<F: RichField, W: WitnessHashSha2<F>>(
     }
     let f_elts = sync_committee_aggregate.iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<_>>();
     witness.set_target_arr(&target.sync_committee.aggregate_pubkey, &f_elts);
+
+    let f_sig = signature.iter().map(|x| F::from_canonical_u8(*x)).collect::<Vec<_>>();
+    witness.set_target_arr(&target.signature_bytes, &f_sig);
+
+    witness.set_proof_with_pis_target(&target.bls_proof, bls_proof);
+    witness.set_verifier_data_target(&target.bls_verifier_data, bls_verifier_data);
 }

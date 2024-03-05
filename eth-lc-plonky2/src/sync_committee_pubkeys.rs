@@ -28,7 +28,7 @@ pub fn add_virtual_sync_committee_target<F: RichField + Extendable<D>,
     }
 }
 
-fn read_u32_be<F: RichField + Extendable<D>,
+pub fn read_u32_be<F: RichField + Extendable<D>,
     const D: usize
 >(
     builder: &mut CircuitBuilder<F, D>,
