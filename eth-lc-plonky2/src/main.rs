@@ -31,6 +31,12 @@ fn main() {
     let mut light_client_update_json_str = String::new();
     file.read_to_string(&mut light_client_update_json_str)
         .expect("Unable to read file");
+
+    let mut prev_file = File::open("eth-lc-plonky2/src/light_client_update_period_633.json").unwrap();
+    let mut prev_light_client_update_json_str = String::new();
+    prev_file.read_to_string(&mut prev_light_client_update_json_str)
+        .expect("Unable to read file");
+
     let routes = BeaconRPCRoutes{
         get_block: String::from(""),
         get_block_header: String::from(""),
@@ -86,6 +92,7 @@ fn main() {
     // ];
 
     let sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
+    let prev_sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes,&prev_light_client_update_json_str).unwrap();
 
     let cur_slot = 5188736;
     let cur_header = hex::decode("0xfe2c5e5a3f845dc9af5b872f05d92730ea7017ac0048c0f5598345b019e42667".split_at(2).1).unwrap().try_into().unwrap();
@@ -114,12 +121,12 @@ fn main() {
     let new_state = new_state.tree_hash_root().0;
     // let participation = 433;
     let new_sync_committee_ii_branch:[[u8;32];5] = sync_committee_update.next_sync_committee_branch.iter().map(|i| i.0.0).collect::<Vec<[u8;32]>>().try_into().expect("Incorrect length");
-    let sync_committee_pubkeys = sync_committee_update.next_sync_committee.pubkeys.0
+    let sync_committee_pubkeys = prev_sync_committee_update.next_sync_committee.pubkeys.0
                                                                                                         .iter()
                                                                                                         .map(|i| i.0.to_vec())
                                                                                                         .collect::<Vec<Vec<u8>>>();
 
-    let sync_committee_aggregate = sync_committee_update.next_sync_committee.aggregate_pubkey.0.to_vec();
+    let sync_committee_aggregate = prev_sync_committee_update.next_sync_committee.aggregate_pubkey.0.to_vec();
 
     let sync_aggregate = get_sync_aggregate_from_light_client_update_json_str(&light_client_update_json_str).unwrap();
     let mut sync_committee_bits= Vec::new();
