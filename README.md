@@ -11,6 +11,8 @@
 - `cargo run --release`
 - `cargo test --release`
 
+Note: To run the program, you need to set the path of *plonky2_proof*, *plonky2_verifier_data*, *plonky2_common_data* generated from the [starky_bls12_381](https://github.com/Electron-labs/starky_bls12_381/tree/feat/ec_aggregate_pk) repo.
+
 ## Introduction
 This circuit (accompanied by a smart contract) aims to create proof of Ethereum Blockchain's consensus on its finalized header.
 It can be used to generate proofs for 2 scenarios:
@@ -50,6 +52,8 @@ The circuit can be broken down into the following key subcircuits:
   <p>Here, the <i>Finality Branch</i> (from the LC update) is used to prove <i>Finalized Header Root</i> against <i>Attested State Root</i>.</p>
 - #### MerkleTree (Finalized Header)
   <p><i>Finalized Header Root</i> is computed in this circuit using a number of inputs(leafs) including <i> Finalized Slot</i> and <i>Finalized State Root</i>. This ensures the correctness of all the inputs used.</p>
+- #### SyncCommitteeSSZ
+  It computes the SSZ root of the *sync_committee* structure, which should match either one of *curr_sync_committee_i* and *next_sync_committee_i*. 
 - #### VerifySyncCommittee
   <p>It verifies `new_sync_committee_ii` using the merkle proof against <i>Finalized State Root</i>, and  `new_sync_committee_i` by appropriately looking it up into the `cur_state`.</p>
 - #### UpdateValidityTarget
@@ -57,4 +61,11 @@ The circuit can be broken down into the following key subcircuits:
   - Ensures enough participants.
 - #### ContractStateTarget
   <p>It is used to construct the <i>Contract State</i> Merkle tree.
+- #### Plonky2 proof verifier
+  It verifies a plonky2 proof which is a recursive proof of verification of BLS signatures (using starky and plonky2).
+
 - Several other helper circuits are also used throughout.
+
+## Performance
+
+The plonky2 circuit has ~2.98M constraints. Proof generation takes ~300s for generating a proof on AWS r6a.8xlarge machine.
