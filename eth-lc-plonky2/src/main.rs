@@ -131,7 +131,7 @@ fn main() {
     let sync_aggregate = get_sync_aggregate_from_light_client_update_json_str(&light_client_update_json_str).unwrap();
     let mut sync_committee_bits= Vec::new();
     for num in sync_aggregate.sync_committee_bits.0 {
-        for j in (0..8).rev(){
+        for j in 0..8{
             sync_committee_bits.push((num>>j & 1) == 1);
         }
     }
@@ -195,6 +195,7 @@ fn main() {
 
     builder.print_gate_counts(0);
     let data = builder.build::<C>();
+    println!("degree - {}", data.common.fri_params.degree_bits);
     let start_time = std::time::Instant::now();
     let proof = data.prove(witness).unwrap();
     let duration_ms = start_time.elapsed().as_millis();
