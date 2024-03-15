@@ -6,14 +6,17 @@ use plonky2::{
     iop::witness::PartialWitness,
     plonk::{
         circuit_builder::CircuitBuilder,
-        circuit_data::{CircuitConfig, CommonCircuitData, VerifierOnlyCircuitData},
-        config::{GenericConfig, PoseidonGoldilocksConfig}, proof::ProofWithPublicInputs,
+        circuit_data::CircuitConfig,
+        config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
-use plonky2_circuit_serializer::serializer::CustomGateSerializer;
 use tree_hash::TreeHash;
-use std::io::Read;
 use std::fs::File;
+use reqwest;
+use serde_yaml;
+use eth2_utility::consensus::{Network, NetworkConfig,compute_domain,DOMAIN_SYNC_COMMITTEE};
+use starky_bls12_381::aggregate_proof::aggregate_proof;
+
 
 #[derive(Debug, Clone, tree_hash_derive::TreeHash)]
 pub struct ContractState {
@@ -24,18 +27,38 @@ pub struct ContractState {
 }
 
 // TODO: use sync committee proof from lc update
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
-    let mut file = File::open("eth-lc-plonky2/src/light_client_update_period_634.json").unwrap();
-    let mut light_client_update_json_str = String::new();
-    file.read_to_string(&mut light_client_update_json_str)
-        .expect("Unable to read file");
+    let yaml_file = File::open("eth-lc-plonky2/src/rpc.yaml").unwrap();
+    let yaml_data: serde_yaml::Value = serde_yaml::from_reader(yaml_file).expect("not able to read yaml");
 
-    let mut prev_file = File::open("eth-lc-plonky2/src/light_client_update_period_633.json").unwrap();
-    let mut prev_light_client_update_json_str = String::new();
-    prev_file.read_to_string(&mut prev_light_client_update_json_str)
-        .expect("Unable to read file");
+    let finality_update_rpc = yaml_data["finality_update_rpc"].as_str().unwrap();
+    let light_client_rpc = yaml_data["light_client_rpc"].as_str().unwrap();
+
+    let latest_finality_update: serde_json::Value = reqwest::get(finality_update_rpc)
+                                                    .await
+                                                    .unwrap()
+                                                    .json()
+                                                    .await
+                                                    .unwrap();
+    let latest_slot = latest_finality_update["data"]["attested_header"]["beacon"]["slot"].as_str().unwrap().parse::<u64>().unwrap();
+    let period = latest_slot/(256 * 32);
+    let prev_period = period - 1;
+
+    let url = format!("{}?start_period={}&count={}",light_client_rpc, prev_period, 2);
+    let combined_period_lc_updates: serde_json::Value = reqwest::get(url)
+                                                        .await
+                                                        .unwrap()
+                                                        .json()
+                                                        .await
+                                                        .unwrap();
+
+
+    let prev_light_client_update_json = combined_period_lc_updates[0].clone();
+    let prev_light_client_update_json_str = combined_period_lc_updates[0].to_string();     
+    let light_client_update_json_str = combined_period_lc_updates[1].to_string();   
 
     let routes = BeaconRPCRoutes{
         get_block: String::from(""),
@@ -55,9 +78,12 @@ fn main() {
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
 
-    let domain:[u8;32] = hex::decode("0x07000000628941ef21d1fe8c7134720add10bb91e3b02c007e0046d2472c6695".split_at(2).1).unwrap().try_into().unwrap();
+    let eth_network = Network::Mainnet;
+    let eth_network_config = NetworkConfig::new(&eth_network);
+
     
     let attested_header = get_attested_header_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
+    let domain:[u8;32] = compute_domain(DOMAIN_SYNC_COMMITTEE, eth_network_config.compute_fork_version_by_slot(attested_header.slot).unwrap(), H256::from(eth_network_config.genesis_validators_root)).0.0;
     let domain_h256 = H256::from(domain);
     let signing_root = compute_signing_root(eth_types::H256(attested_header.tree_hash_root()), domain_h256).0.0;
 
@@ -81,7 +107,6 @@ fn main() {
                                                                 .collect::<Vec<[u8;32]>>()
                                                                 .try_into()
                                                                 .expect("Incorrect Length");
-
     // let cur_state = [
     //     150, 97, 120, 105, 126, 50, 222, 233, 169, 14, 3, 45, 102, 32, 221, 69, 151, 120, 157, 18,
     //     19, 66, 229, 81, 65, 253, 180, 52, 214, 21, 206, 131,
@@ -91,14 +116,14 @@ fn main() {
     //     187, 51, 189, 135, 92, 146, 108, 100, 39, 249, 104, 231, 198,
     // ];
 
-    let sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
-    let prev_sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes,&prev_light_client_update_json_str).unwrap();
 
-    let cur_slot = 5188736;
-    let cur_header = hex::decode("0xfe2c5e5a3f845dc9af5b872f05d92730ea7017ac0048c0f5598345b019e42667".split_at(2).1).unwrap().try_into().unwrap();
+    let prev_finalized_header_update = get_finality_update_from_light_client_update_json_str(&routes, &prev_light_client_update_json_str).unwrap();
+    let cur_slot = prev_finalized_header_update.header_update.beacon_header.slot;
+    let cur_header = prev_finalized_header_update.header_update.beacon_header.tree_hash_root().0;
     //TODO: Fetch this data from RPC From current and prev sync committee
-    let cur_sync_committee_i = hex::decode("0xd6e98c7049b61922896ec35eed5e2c35c1512899dd882d81e431b8a6e2e4bb2d".split_at(2).1).unwrap().try_into().unwrap();
-    let cur_sync_committee_ii = hex::decode("0x8727843ae07df817392eba322811aa49019ddeccf5257929a4a3b32a3a44e5be".split_at(2).1).unwrap().try_into().unwrap();
+    let prev_sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes,&prev_light_client_update_json_str).unwrap();
+    let cur_sync_committee_i = prev_sync_committee_update.next_sync_committee_branch[0].0.0;
+    let cur_sync_committee_ii = prev_sync_committee_update.next_sync_committee.tree_hash_root().0;
 
     let cur_state = ContractState {
         cur_slot,
@@ -108,6 +133,7 @@ fn main() {
     };
     let cur_state = cur_state.tree_hash_root().0;
 
+    let sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
     //TODO: Fetch this data from RPC From current and prev sync committee
     let new_sync_committee_i = sync_committee_update.next_sync_committee_branch[0].0.0;
     let new_sync_committee_ii = sync_committee_update.next_sync_committee.tree_hash_root().0;
@@ -126,6 +152,12 @@ fn main() {
                                                                                                         .map(|i| i.0.to_vec())
                                                                                                         .collect::<Vec<Vec<u8>>>();
 
+    let sync_committe_pubkeys_str = prev_light_client_update_json["data"]["next_sync_committee"]["pubkeys"]
+                                                                                                                .as_array().unwrap()
+                                                                                                                .iter()
+                                                                                                                .map(|i| i.to_string())
+                                                                                                                .collect::<Vec<String>>();
+
     let sync_committee_aggregate = prev_sync_committee_update.next_sync_committee.aggregate_pubkey.0.to_vec();
 
     let sync_aggregate = get_sync_aggregate_from_light_client_update_json_str(&light_client_update_json_str).unwrap();
@@ -137,13 +169,11 @@ fn main() {
     }
     let signature = sync_aggregate.sync_committee_signature.0.to_vec();
 
-    let proof_bytes = std::fs::read("../starky_bls12_381/proof_with_pis.bin").unwrap();
-    let verifier_bytes = std::fs::read("../starky_bls12_381/verifier_only.bin").unwrap();
-    let cd_bytes = std::fs::read("../starky_bls12_381/common_data.bin").unwrap();
-
-    let common_data = CommonCircuitData::from_bytes(cd_bytes, &CustomGateSerializer).unwrap();
-    let bls_proof = ProofWithPublicInputs::from_bytes(proof_bytes, &common_data).unwrap();
-    let bls_verifier_data = VerifierOnlyCircuitData::<C, D>::from_bytes(verifier_bytes).unwrap();
+    let proof = aggregate_proof(sync_committe_pubkeys_str, sync_aggregate, signing_root, prev_sync_committee_update);
+    
+    let common_data = proof.2;
+    let bls_proof = proof.0;
+    let bls_verifier_data = proof.1;
     let target = add_virtual_proof_target::<F, D, C>(&mut builder, &common_data);
 
     // register public inputs
