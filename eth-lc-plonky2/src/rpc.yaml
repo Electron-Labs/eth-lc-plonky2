@@ -1,0 +1,2 @@
+finality_update_rpc: http://unstable.mainnet.beacon-api.nimbus.team/eth/v1/beacon/light_client/finality_update
+light_client_rpc: http://unstable.mainnet.beacon-api.nimbus.team/eth/v1/beacon/light_client/updates

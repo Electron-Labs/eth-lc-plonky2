@@ -1,4 +1,7 @@
-use eth_lc_plonky2::targets::{add_virtual_proof_target, set_proof_target};
+use eth_lc_plonky2::{
+    targets::{add_virtual_proof_target, set_proof_target}, 
+    utils::{ compute_signing_root, get_attested_header_from_light_client_update_json_str, get_finality_update_from_light_client_update_json_str, get_sync_aggregate_from_light_client_update_json_str, get_sync_committee_update_from_light_client_update_json_str, BeaconRPCRoutes, BeaconRPCVersion}};
+use eth_types::H256;
 use plonky2::{
     iop::witness::PartialWitness,
     plonk::{
@@ -7,9 +10,67 @@ use plonky2::{
         config::{GenericConfig, PoseidonGoldilocksConfig},
     },
 };
+use tree_hash::TreeHash;
+use std::fs::File;
+use reqwest;
+use serde_yaml;
+use eth2_utility::consensus::{Network, NetworkConfig,compute_domain,DOMAIN_SYNC_COMMITTEE};
+use starky_bls12_381::aggregate_proof::aggregate_proof;
+
+
+#[derive(Debug, Clone, tree_hash_derive::TreeHash)]
+pub struct ContractState {
+    cur_slot: u64,
+    cur_header: [u8; 32],
+    cur_sync_committee_i: [u8; 32],
+    cur_sync_committee_ii: [u8; 32],
+}
 
 // TODO: use sync committee proof from lc update
-fn main() {
+#[tokio::main]
+async fn main() {
+    env_logger::init();
+
+    let yaml_file = File::open("eth-lc-plonky2/src/rpc.yaml").unwrap();
+    let yaml_data: serde_yaml::Value = serde_yaml::from_reader(yaml_file).expect("not able to read yaml");
+
+    let finality_update_rpc = yaml_data["finality_update_rpc"].as_str().unwrap();
+    let light_client_rpc = yaml_data["light_client_rpc"].as_str().unwrap();
+
+    let latest_finality_update: serde_json::Value = reqwest::get(finality_update_rpc)
+                                                    .await
+                                                    .unwrap()
+                                                    .json()
+                                                    .await
+                                                    .unwrap();
+    let latest_slot = latest_finality_update["data"]["attested_header"]["beacon"]["slot"].as_str().unwrap().parse::<u64>().unwrap();
+    let period = latest_slot/(256 * 32);
+    let prev_period = period - 1;
+
+    let url = format!("{}?start_period={}&count={}",light_client_rpc, prev_period, 2);
+    let combined_period_lc_updates: serde_json::Value = reqwest::get(url)
+                                                        .await
+                                                        .unwrap()
+                                                        .json()
+                                                        .await
+                                                        .unwrap();
+
+
+    let prev_light_client_update_json = combined_period_lc_updates[0].clone();
+    let prev_light_client_update_json_str = combined_period_lc_updates[0].to_string();     
+    let light_client_update_json_str = combined_period_lc_updates[1].to_string();   
+
+    let routes = BeaconRPCRoutes{
+        get_block: String::from(""),
+        get_block_header: String::from(""),
+        get_light_client_finality_update: String::from(""),
+        get_light_client_update: String::from(""),
+        get_light_client_update_by_epoch: String::from(""),
+        get_bootstrap: String::from(""),
+        get_state: String::from(""),
+        version: BeaconRPCVersion::V1_5,
+    };
+
     const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
     type F = <C as GenericConfig<D>>::F;
@@ -17,135 +78,104 @@ fn main() {
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
 
-    let signing_root = [
-        56, 34, 152, 174, 255, 250, 16, 209, 187, 193, 153, 135, 200, 211, 31, 48, 199, 67, 135, 8,
-        13, 126, 185, 128, 199, 225, 26, 36, 76, 29, 30, 24,
-    ];
-    let domain = [
-        7, 0, 0, 0, 98, 137, 65, 239, 33, 209, 254, 140, 113, 52, 114, 10, 221, 16, 187, 145, 227,
-        176, 44, 0, 126, 0, 70, 210, 71, 44, 102, 149,
-    ];
+    let eth_network = Network::Mainnet;
+    let eth_network_config = NetworkConfig::new(&eth_network);
 
-    let attested_slot = 6594800;
-    let attested_proposer_index = 129338;
-    let attested_header_root = [
-        45, 46, 11, 136, 235, 78, 3, 151, 19, 228, 16, 48, 115, 245, 106, 188, 84, 93, 97, 161,
-        234, 102, 5, 70, 123, 252, 35, 196, 121, 101, 208, 169,
-    ];
-    let attested_parent_root = [
-        213, 76, 68, 219, 231, 47, 225, 89, 64, 174, 35, 97, 236, 85, 92, 30, 69, 195, 16, 211, 39,
-        116, 204, 209, 115, 104, 174, 98, 2, 139, 174, 188,
-    ];
-    let attested_state_root = [
-        63, 9, 75, 128, 166, 145, 188, 227, 140, 72, 0, 97, 242, 221, 96, 205, 96, 4, 87, 142, 166,
-        173, 235, 32, 25, 129, 185, 198, 51, 19, 222, 37,
-    ];
-    let attested_body_root = [
-        47, 103, 87, 100, 235, 133, 223, 8, 241, 35, 41, 215, 182, 47, 244, 214, 153, 23, 154, 152,
-        34, 90, 84, 243, 247, 10, 86, 61, 40, 217, 22, 179,
-    ];
+    
+    let attested_header = get_attested_header_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
+    let domain:[u8;32] = compute_domain(DOMAIN_SYNC_COMMITTEE, eth_network_config.compute_fork_version_by_slot(attested_header.slot).unwrap(), H256::from(eth_network_config.genesis_validators_root)).0.0;
+    let domain_h256 = H256::from(domain);
+    let signing_root = compute_signing_root(eth_types::H256(attested_header.tree_hash_root()), domain_h256).0.0;
 
-    let finalized_slot = 6594720;
-    let finalized_proposer_index = 568529;
-    let finalized_header_root = [
-        181, 47, 90, 74, 144, 147, 36, 105, 62, 96, 18, 13, 201, 106, 185, 87, 99, 0, 172, 243,
-        251, 239, 179, 67, 235, 186, 53, 70, 1, 99, 36, 59,
-    ];
-    let finalized_parent_root = [
-        180, 103, 151, 22, 8, 23, 130, 247, 9, 74, 38, 255, 22, 181, 149, 170, 41, 158, 249, 110,
-        167, 43, 29, 101, 138, 254, 184, 160, 83, 107, 44, 205,
-    ];
-    let finalized_state_root = [
-        255, 194, 217, 140, 47, 98, 13, 224, 31, 61, 140, 226, 182, 49, 32, 135, 209, 115, 106,
-        168, 199, 20, 150, 211, 204, 128, 11, 53, 4, 57, 189, 214,
-    ];
-    let finalized_body_root = [
-        27, 8, 73, 47, 97, 144, 162, 131, 173, 140, 159, 231, 192, 84, 246, 121, 7, 105, 106, 35,
-        196, 60, 171, 172, 154, 28, 11, 196, 32, 10, 148, 81,
-    ];
-    let finality_branch = [
-        [
-            5, 37, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0,
-        ],
-        [
-            94, 55, 201, 67, 169, 114, 49, 101, 76, 59, 176, 39, 192, 166, 77, 126, 236, 211, 158,
-            22, 111, 58, 108, 110, 54, 147, 11, 36, 168, 93, 204, 220,
-        ],
-        [
-            8, 243, 135, 44, 165, 69, 219, 40, 142, 167, 91, 236, 16, 141, 72, 178, 46, 254, 254,
-            222, 44, 195, 253, 46, 150, 235, 43, 97, 56, 219, 200, 211,
-        ],
-        [
-            32, 187, 215, 199, 83, 3, 35, 106, 19, 235, 176, 126, 125, 224, 39, 82, 198, 63, 23,
-            201, 142, 233, 64, 218, 46, 15, 120, 3, 240, 53, 245, 70,
-        ],
-        [
-            74, 134, 157, 134, 15, 2, 90, 127, 92, 87, 114, 210, 19, 176, 7, 231, 124, 35, 24, 182,
-            150, 206, 137, 194, 18, 18, 109, 43, 167, 165, 188, 233,
-        ],
-        [
-            232, 122, 159, 132, 245, 105, 223, 74, 123, 6, 67, 140, 167, 85, 144, 113, 116, 158,
-            82, 174, 184, 248, 74, 214, 236, 65, 164, 36, 144, 53, 1, 81,
-        ],
-    ];
+    let attested_slot = attested_header.slot;
+    let attested_proposer_index = attested_header.proposer_index;
+    let attested_header_root = attested_header.tree_hash_root().0;
+    let attested_parent_root = attested_header.parent_root.0.0;
+    let attested_state_root = attested_header.state_root.0.0;
+    let attested_body_root = attested_header.body_root.0.0;
 
-    let cur_state = [
-        150, 97, 120, 105, 126, 50, 222, 233, 169, 14, 3, 45, 102, 32, 221, 69, 151, 120, 157, 18,
-        19, 66, 229, 81, 65, 253, 180, 52, 214, 21, 206, 131,
-    ];
-    let new_state = [
-        138, 202, 109, 111, 105, 232, 211, 47, 153, 145, 225, 113, 61, 169, 147, 26, 82, 43, 39,
-        187, 51, 189, 135, 92, 146, 108, 100, 39, 249, 104, 231, 198,
-    ];
-    let cur_slot = 6588416;
-    let cur_header = [
-        115, 117, 208, 140, 31, 202, 241, 87, 161, 53, 213, 45, 186, 177, 206, 189, 224, 21, 58,
-        28, 142, 128, 12, 189, 218, 111, 189, 237, 87, 148, 52, 30,
-    ];
-    let cur_sync_committee_i = [
-        188, 31, 36, 188, 220, 111, 116, 137, 15, 146, 183, 216, 229, 39, 129, 177, 40, 128, 239,
-        35, 167, 206, 40, 212, 42, 230, 215, 31, 148, 161, 234, 95,
-    ];
-    let cur_sync_committee_ii = [
-        91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98, 134,
-        54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
-    ];
-    let new_sync_committee_i = [
-        91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98, 134,
-        54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
-    ];
-    let new_sync_committee_ii = [
-        83, 234, 237, 227, 27, 56, 198, 90, 51, 53, 231, 79, 205, 86, 243, 22, 78, 64, 231, 34,
-        181, 64, 117, 148, 168, 70, 125, 103, 132, 248, 196, 20,
-    ];
-    let participation = 433;
-    let new_sync_committee_ii_branch = [
-        [
-            91, 25, 250, 154, 30, 166, 30, 166, 57, 186, 237, 119, 150, 72, 21, 138, 84, 120, 98,
-            134, 54, 209, 182, 48, 144, 79, 107, 143, 75, 69, 200, 78,
-        ],
-        [
-            192, 176, 252, 182, 85, 11, 154, 145, 221, 98, 155, 155, 158, 60, 173, 241, 213, 54,
-            131, 211, 119, 194, 7, 157, 33, 187, 197, 222, 227, 216, 54, 98,
-        ],
-        [
-            165, 36, 105, 106, 20, 36, 145, 228, 172, 136, 6, 141, 170, 197, 46, 200, 192, 152, 92,
-            238, 87, 130, 126, 101, 160, 54, 142, 169, 71, 0, 39, 176,
-        ],
-        [
-            4, 17, 122, 94, 130, 198, 53, 220, 161, 116, 98, 62, 225, 44, 232, 99, 6, 93, 128, 0,
-            173, 254, 166, 231, 209, 149, 127, 31, 129, 251, 37, 168,
-        ],
-        [
-            176, 81, 237, 96, 109, 253, 159, 172, 93, 93, 4, 53, 163, 64, 13, 153, 245, 72, 150,
-            186, 226, 112, 59, 248, 20, 12, 219, 91, 31, 163, 108, 199,
-        ],
-    ];
+    let finalized_header_update = get_finality_update_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
+    let finalized_slot = finalized_header_update.header_update.beacon_header.slot;
+    let finalized_proposer_index = finalized_header_update.header_update.beacon_header.proposer_index;
+    let finalized_header_root = finalized_header_update.header_update.beacon_header.tree_hash_root().0;
+    let finalized_parent_root = finalized_header_update.header_update.beacon_header.parent_root.0.0;
+    let finalized_state_root = finalized_header_update.header_update.beacon_header.state_root.0.0;
+    let finalized_body_root = finalized_header_update.header_update.beacon_header.body_root.0.0;
+    let finality_branch = finalized_header_update.finality_branch
+                                                                .iter()
+                                                                .map(|i| i.0.0)
+                                                                .collect::<Vec<[u8;32]>>()
+                                                                .try_into()
+                                                                .expect("Incorrect Length");
+    // let cur_state = [
+    //     150, 97, 120, 105, 126, 50, 222, 233, 169, 14, 3, 45, 102, 32, 221, 69, 151, 120, 157, 18,
+    //     19, 66, 229, 81, 65, 253, 180, 52, 214, 21, 206, 131,
+    // ];
+    // let new_state = [
+    //     138, 202, 109, 111, 105, 232, 211, 47, 153, 145, 225, 113, 61, 169, 147, 26, 82, 43, 39,
+    //     187, 51, 189, 135, 92, 146, 108, 100, 39, 249, 104, 231, 198,
+    // ];
 
-    let target = add_virtual_proof_target(&mut builder);
 
-    // TODO: participation: how is it verified?
+    let prev_finalized_header_update = get_finality_update_from_light_client_update_json_str(&routes, &prev_light_client_update_json_str).unwrap();
+    let cur_slot = prev_finalized_header_update.header_update.beacon_header.slot;
+    let cur_header = prev_finalized_header_update.header_update.beacon_header.tree_hash_root().0;
+    //TODO: Fetch this data from RPC From current and prev sync committee
+    let prev_sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes,&prev_light_client_update_json_str).unwrap();
+    let cur_sync_committee_i = prev_sync_committee_update.next_sync_committee_branch[0].0.0;
+    let cur_sync_committee_ii = prev_sync_committee_update.next_sync_committee.tree_hash_root().0;
+
+    let cur_state = ContractState {
+        cur_slot,
+        cur_header,
+        cur_sync_committee_i,
+        cur_sync_committee_ii,
+    };
+    let cur_state = cur_state.tree_hash_root().0;
+
+    let sync_committee_update = get_sync_committee_update_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
+    //TODO: Fetch this data from RPC From current and prev sync committee
+    let new_sync_committee_i = sync_committee_update.next_sync_committee_branch[0].0.0;
+    let new_sync_committee_ii = sync_committee_update.next_sync_committee.tree_hash_root().0;
+
+    let new_state = ContractState {
+        cur_slot: finalized_slot,
+        cur_header: finalized_header_root,
+        cur_sync_committee_i: new_sync_committee_i,
+        cur_sync_committee_ii: new_sync_committee_ii,
+    };
+    let new_state = new_state.tree_hash_root().0;
+    // let participation = 433;
+    let new_sync_committee_ii_branch:[[u8;32];5] = sync_committee_update.next_sync_committee_branch.iter().map(|i| i.0.0).collect::<Vec<[u8;32]>>().try_into().expect("Incorrect length");
+    let sync_committee_pubkeys = prev_sync_committee_update.next_sync_committee.pubkeys.0
+                                                                                                        .iter()
+                                                                                                        .map(|i| i.0.to_vec())
+                                                                                                        .collect::<Vec<Vec<u8>>>();
+
+    let sync_committe_pubkeys_str = prev_light_client_update_json["data"]["next_sync_committee"]["pubkeys"]
+                                                                                                                .as_array().unwrap()
+                                                                                                                .iter()
+                                                                                                                .map(|i| i.to_string())
+                                                                                                                .collect::<Vec<String>>();
+
+    let sync_committee_aggregate = prev_sync_committee_update.next_sync_committee.aggregate_pubkey.0.to_vec();
+
+    let sync_aggregate = get_sync_aggregate_from_light_client_update_json_str(&light_client_update_json_str).unwrap();
+    let mut sync_committee_bits= Vec::new();
+    for num in sync_aggregate.sync_committee_bits.0 {
+        for j in 0..8{
+            sync_committee_bits.push((num>>j & 1) == 1);
+        }
+    }
+    let signature = sync_aggregate.sync_committee_signature.0.to_vec();
+
+    let proof = aggregate_proof(sync_committe_pubkeys_str, sync_aggregate, signing_root, prev_sync_committee_update);
+    
+    let common_data = proof.2;
+    let bls_proof = proof.0;
+    let bls_verifier_data = proof.1;
+    let target = add_virtual_proof_target::<F, D, C>(&mut builder, &common_data);
+
     // register public inputs
     target
         .cur_state
@@ -182,12 +212,20 @@ fn main() {
         &cur_sync_committee_ii,
         &new_sync_committee_i,
         &new_sync_committee_ii,
-        participation,
+        &sync_committee_bits,
+        // participation,
         &new_sync_committee_ii_branch,
+        &sync_committee_pubkeys,
+        &sync_committee_aggregate,
+        &signature,
+        &bls_proof,
+        &bls_verifier_data,
         &target,
     );
 
+    builder.print_gate_counts(0);
     let data = builder.build::<C>();
+    println!("degree - {}", data.common.fri_params.degree_bits);
     let start_time = std::time::Instant::now();
     let proof = data.prove(witness).unwrap();
     let duration_ms = start_time.elapsed().as_millis();
