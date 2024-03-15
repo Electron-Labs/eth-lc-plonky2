@@ -936,25 +936,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eth-lc-plonky2"
-version = "0.1.0"
-source = "git+https://github.com/Electron-Labs/eth-lc-plonky2?branch=feat/bls_integration#a5a3d79146bd5a268631567657f35ead13e46fb1"
-dependencies = [
- "env_logger 0.11.3",
- "eth-types",
- "hex",
- "num",
- "plonky2",
- "plonky2-circuit-serializer",
- "plonky2_crypto",
- "serde",
- "serde_json",
- "tree_hash",
- "tree_hash_derive",
- "types",
-]
-
-[[package]]
 name = "eth-types"
 version = "0.1.0"
 source = "git+https://github.com/aurora-is-near/rainbow-bridge#6620a56ee99e9225e70ed4400159d057c06ef39f"
@@ -3265,13 +3246,11 @@ dependencies = [
 [[package]]
 name = "starky_bls12_381"
 version = "0.1.0"
-source = "git+https://github.com/Electron-Labs/starky_bls12_381?branch=generalised_input#e819b5aff5f14fb6488931c3f2b755a63ad6f820"
+source = "git+https://github.com/Electron-Labs/starky_bls12_381?branch=feat/ec_aggregate_pk#3c8907f0a95db89ec1fe3a5b49bb39da487aa5c7"
 dependencies = [
  "anyhow",
  "env_logger 0.9.3",
- "eth-lc-plonky2 0.1.0 (git+https://github.com/Electron-Labs/eth-lc-plonky2?branch=feat/bls_integration)",
  "eth-types",
- "futures",
  "hex",
  "itertools 0.10.5",
  "log",
@@ -3279,12 +3258,10 @@ dependencies = [
  "plonky2",
  "plonky2-circuit-serializer",
  "plonky2_crypto",
- "reqwest",
  "serde_json",
  "snowbridge-milagro-bls",
  "starky",
  "to-binary",
- "tokio",
  "tree_hash",
  "tree_hash_derive",
 ]

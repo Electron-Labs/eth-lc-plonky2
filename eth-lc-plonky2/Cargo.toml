@@ -19,7 +19,7 @@ plonky2-circuit-serializer = { git = "https://github.com/Electron-Labs/plonky2-c
 serde_json = "1.0.114"
 serde = "1.0.197"
 types = { git = "https://github.com/aurora-is-near/lighthouse", branch = "unstable"}
-starky_bls12_381 = {git = "https://github.com/Electron-Labs/starky_bls12_381", branch = "generalised_input"}
+starky_bls12_381 = {git = "https://github.com/Electron-Labs/starky_bls12_381", branch = "feat/ec_aggregate_pk"}
 reqwest = { version = "0.11", features = ["json"] } 
 futures = "0.3"
 tokio = { version = "1.12.0", features = ["full"] } 

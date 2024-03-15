@@ -81,9 +81,9 @@ async fn main() {
     let eth_network = Network::Mainnet;
     let eth_network_config = NetworkConfig::new(&eth_network);
 
-    let domain:[u8;32] = compute_domain(DOMAIN_SYNC_COMMITTEE, eth_network_config.deneb_fork_version, H256::from(eth_network_config.genesis_validators_root)).0.0;
     
     let attested_header = get_attested_header_from_light_client_update_json_str(&routes, &light_client_update_json_str).unwrap();
+    let domain:[u8;32] = compute_domain(DOMAIN_SYNC_COMMITTEE, eth_network_config.compute_fork_version_by_slot(attested_header.slot).unwrap(), H256::from(eth_network_config.genesis_validators_root)).0.0;
     let domain_h256 = H256::from(domain);
     let signing_root = compute_signing_root(eth_types::H256(attested_header.tree_hash_root()), domain_h256).0.0;
 
